@@ -1,15 +1,5 @@
 # MCP RAG Docs Tasks
 
-## Completed Tasks
-
-### Timeout Issue Fix for Large Repository Indexing
-- ✅ Implemented asynchronous processing for repository indexing
-- ✅ Created IndexingStatusManager for tracking indexing progress
-- ✅ Added get_indexing_status tool for monitoring indexing operations
-- ✅ Reduced batch size from 100 to 50 chunks for better responsiveness
-- ✅ Updated documentation with new asynchronous approach
-- ✅ Added troubleshooting section for timeout issues
-
 ## Pending Tasks
 
 ### Repository Indexing Enhancements
