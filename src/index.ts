@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ApiClient } from "./api-client.js";
 import { HandlerRegistry } from "./handler-registry.js";
 import { WebInterface } from "./server.js";
+import { RepositoryConfigLoader } from "./utils/repository-config-loader.js";
 
 const COLLECTION_NAME = "documentation";
 
@@ -12,6 +13,7 @@ class RagDocsServer {
   private apiClient: ApiClient;
   private handlerRegistry: HandlerRegistry;
   private webInterface: WebInterface;
+  private repoConfigLoader: RepositoryConfigLoader;
 
   constructor() {
     this.server = new Server(
@@ -35,6 +37,7 @@ class RagDocsServer {
     this.apiClient = new ApiClient();
     this.handlerRegistry = new HandlerRegistry(this.server, this.apiClient);
     this.webInterface = new WebInterface(this.apiClient);
+    this.repoConfigLoader = new RepositoryConfigLoader(this.server, this.apiClient);
 
     // Error handling
     this.server.onerror = (error) => console.error("[MCP Error]", error);
@@ -53,7 +56,6 @@ class RagDocsServer {
   async run() {
     try {
       // Redirect console.log to stderr to avoid interfering with JSON-RPC communication
-      const originalConsoleLog = console.log;
       console.log = (...args) => {
         process.stderr.write(args.join(' ') + '\n');
       };
@@ -66,6 +68,10 @@ class RagDocsServer {
       // Start web interface
       await this.webInterface.start();
       console.log("Web interface is running");
+
+      // Load repositories from configuration
+      console.log("Loading repositories from configuration...");
+      await this.repoConfigLoader.loadRepositories();
 
       // Start MCP server
       const transport = new StdioServerTransport();

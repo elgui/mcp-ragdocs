@@ -61,6 +61,31 @@ An MCP server implementation that provides tools for retrieving and processing d
    - Chunks content intelligently for optimal retrieval
    - Required parameter: `url` (must include protocol, e.g., https://)
 
+9. **add_repository**
+   - Index a local code repository for documentation
+   - Configure include/exclude patterns for files and directories
+   - Supports different chunking strategies based on file types
+   - Required parameter: `path` (absolute path to repository)
+
+10. **list_repositories**
+    - List all indexed repositories with their configurations
+    - Shows include/exclude patterns and watch status
+
+11. **update_repository**
+    - Re-index a repository with updated configuration
+    - Can modify include/exclude patterns and other settings
+    - Required parameter: `name` (repository name)
+
+12. **remove_repository**
+    - Remove a repository from the index
+    - Deletes all associated documents from the vector database
+    - Required parameter: `name` (repository name)
+
+13. **watch_repository**
+    - Start or stop watching a repository for changes
+    - Automatically updates the index when files change
+    - Required parameters: `name` (repository name) and `action` ("start" or "stop")
+
 ## Quick Start
 
 The RAG Documentation tool is designed for:
@@ -139,7 +164,12 @@ Add this to your `cline_mcp_settings.json`:
         "list_queue",
         "run_queue",
         "clear_queue",
-        "add_documentation"
+        "add_documentation",
+        "add_repository",
+        "list_repositories",
+        "update_repository",
+        "remove_repository",
+        "watch_repository"
       ]
     }
   }
@@ -172,7 +202,12 @@ Add this to your `claude_desktop_config.json`:
         "list_queue",
         "run_queue",
         "clear_queue",
-        "add_documentation"
+        "add_documentation",
+        "add_repository",
+        "list_repositories",
+        "update_repository",
+        "remove_repository",
+        "watch_repository"
       ]
     }
   }
@@ -224,6 +259,89 @@ The system provides two complementary approaches for adding documentation:
    - Provides resilience through the queue system
 
 Choose the approach that best fits your documentation management needs. For small numbers of important documents, direct addition provides immediate results. For large documentation sets or recursive crawling, the queue-based approach offers better scalability.
+
+### Local Repository Indexing
+
+The system supports indexing local code repositories, making their content searchable alongside web documentation:
+
+1. **Repository Configuration**
+   - Define which files to include/exclude using glob patterns
+   - Configure chunking strategies per file type
+   - Set up automatic change detection with watch mode
+
+2. **File Processing**
+   - Files are processed based on their type and language
+   - Code is chunked intelligently to preserve context
+   - Metadata like file path and language are preserved
+
+3. **Change Detection**
+   - Repositories can be watched for changes
+   - Modified files are automatically re-indexed
+   - Deleted files are removed from the index
+
+Example usage:
+```
+add_repository with {
+  "path": "/path/to/your/repo",
+  "name": "my-project",
+  "include": ["**/*.js", "**/*.ts", "**/*.md"],
+  "exclude": ["**/node_modules/**", "**/dist/**"],
+  "watchMode": true
+}
+```
+
+### Repository Configuration File
+
+The system supports a `repositories.json` configuration file that allows you to define repositories to be automatically indexed at startup:
+
+```json
+{
+  "repositories": [
+    {
+      "path": "/path/to/your/repo",
+```
+
+The configuration file is automatically updated when repositories are added, updated, or removed using the repository management tools. You can also manually edit the file to configure repositories before starting the server. The paths within the configuration file, such as the `path` for each repository and the implicit location of `repositories.json` itself, are resolved relative to the project root directory where the server is executed.
+
+**Configuration Options:**
+
+- `repositories`: Array of repository configurations
+  - `path`: Absolute path to the repository directory
+      "name": "my-project",
+      "include": ["**/*.js", "**/*.ts", "**/*.md"],
+      "exclude": ["**/node_modules/**", "**/.git/**"],
+      "watchMode": true,
+      "watchInterval": 60000,
+      "chunkSize": 1000,
+      "fileTypeConfig": {
+        ".js": { "include": true, "chunkStrategy": "semantic" },
+        ".ts": { "include": true, "chunkStrategy": "semantic" },
+        ".md": { "include": true, "chunkStrategy": "semantic" }
+      }
+    }
+  ],
+  "autoWatch": true
+}
+```
+
+The configuration file is automatically updated when repositories are added, updated, or removed using the repository management tools. You can also manually edit the file to configure repositories before starting the server.
+
+**Configuration Options:**
+
+- `repositories`: Array of repository configurations
+  - `path`: Absolute path to the repository directory
+  - `name`: Unique name for the repository
+  - `include`: Array of glob patterns to include
+  - `exclude`: Array of glob patterns to exclude
+  - `watchMode`: Whether to watch for changes
+  - `watchInterval`: Polling interval in milliseconds
+  - `chunkSize`: Default chunk size for files
+  - `fileTypeConfig`: Configuration for specific file types
+    - `include`: Whether to include this file type
+    - `chunkStrategy`: Chunking strategy ("semantic", "line", or "character")
+    - `chunkSize`: Optional override for chunk size
+
+- `autoWatch`: Whether to automatically start watching repositories with `watchMode: true` at startup
 
 ## Acknowledgments
 

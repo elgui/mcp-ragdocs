@@ -9,3 +9,8 @@ export * from './run-queue.js';
 export * from './clear-queue.js';
 export * from './prompts-list.js';
 export * from './resources-list.js';
+export * from './local-repository.js';
+export * from './list-repositories.js';
+export * from './remove-repository.js';
+export * from './update-repository.js';
+export * from './watch-repository.js';

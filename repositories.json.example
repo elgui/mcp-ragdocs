@@ -1,0 +1,46 @@
+{
+  "repositories": [
+    {
+      "path": "/path/to/your/first/repo",
+      "name": "my-project",
+      "include": ["**/*.js", "**/*.ts", "**/*.md"],
+      "exclude": [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/*.min.js",
+        "**/*.map",
+        "**/package-lock.json",
+        "**/yarn.lock"
+      ],
+      "watchMode": true,
+      "watchInterval": 60000,
+      "chunkSize": 1000,
+      "fileTypeConfig": {
+        ".js": { "include": true, "chunkStrategy": "semantic" },
+        ".ts": { "include": true, "chunkStrategy": "semantic" },
+        ".md": { "include": true, "chunkStrategy": "semantic" },
+        ".json": { "include": true, "chunkStrategy": "line" }
+      }
+    },
+    {
+      "path": "/path/to/your/second/repo",
+      "name": "documentation",
+      "include": ["**/*.md", "**/*.txt", "**/*.rst"],
+      "exclude": [
+        "**/.git/**",
+        "**/node_modules/**"
+      ],
+      "watchMode": false,
+      "watchInterval": 300000,
+      "chunkSize": 1500,
+      "fileTypeConfig": {
+        ".md": { "include": true, "chunkStrategy": "semantic" },
+        ".txt": { "include": true, "chunkStrategy": "line" },
+        ".rst": { "include": true, "chunkStrategy": "semantic" }
+      }
+    }
+  ],
+  "autoWatch": true
+}
