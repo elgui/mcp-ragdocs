@@ -25,6 +25,9 @@ class RagDocsServer {
           prompts: {
             listChanged: false
           },
+          resources: {
+            listChanged: false
+          },
         },
       }
     );
@@ -49,6 +52,12 @@ class RagDocsServer {
 
   async run() {
     try {
+      // Redirect console.log to stderr to avoid interfering with JSON-RPC communication
+      const originalConsoleLog = console.log;
+      console.log = (...args) => {
+        process.stderr.write(args.join(' ') + '\n');
+      };
+
       // Initialize Qdrant collection
       console.log("Initializing Qdrant collection...");
       await this.apiClient.initCollection(COLLECTION_NAME);
@@ -63,7 +72,7 @@ class RagDocsServer {
       await this.server.connect(transport);
       console.log("RAG Docs MCP server running on stdio");
     } catch (error) {
-      console.error("Failed to initialize server:", error);
+      process.stderr.write(`Failed to initialize server: ${error}\n`);
       process.exit(1);
     }
   }
@@ -71,6 +80,6 @@ class RagDocsServer {
 
 const server = new RagDocsServer();
 server.run().catch((error) => {
-  console.error("Fatal error:", error);
+  process.stderr.write(`Fatal error: ${error}\n`);
   process.exit(1);
 });

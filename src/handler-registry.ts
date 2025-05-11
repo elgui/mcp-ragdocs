@@ -4,6 +4,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ApiClient } from './api-client.js';
@@ -18,6 +19,7 @@ import {
   RunQueueHandler,
   ClearQueueHandler,
   PromptsListHandler,
+  ResourcesListHandler,
 } from './handlers/index.js';
 
 const COLLECTION_NAME = 'documentation';
@@ -45,8 +47,9 @@ export class HandlerRegistry {
     this.handlers.set('run_queue', new RunQueueHandler(this.server, this.apiClient));
     this.handlers.set('clear_queue', new ClearQueueHandler(this.server, this.apiClient));
 
-    // Setup prompts handler
+    // Setup prompts and resources handlers
     this.handlers.set('prompts/list', new PromptsListHandler(this.server, this.apiClient));
+    this.handlers.set('resources/list', new ResourcesListHandler(this.server, this.apiClient));
   }
 
   private registerHandlers() {
@@ -157,6 +160,22 @@ export class HandlerRegistry {
       // The response from the handler is a McpToolResponse with content
       // We need to parse it back to the expected format for prompts/list
       return { prompts: [] };
+    });
+
+    // Register the resources/list handler
+    this.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+      const handler = this.handlers.get('resources/list');
+      if (!handler) {
+        throw new McpError(
+          ErrorCode.MethodNotFound,
+          'Method resources/list not found'
+        );
+      }
+
+      const response = await handler.handle(request.params);
+      // The response from the handler is a McpToolResponse with content
+      // We need to parse it back to the expected format for resources/list
+      return { resources: [] };
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
