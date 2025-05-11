@@ -22,6 +22,9 @@ class RagDocsServer {
       {
         capabilities: {
           tools: {},
+          prompts: {
+            listChanged: false
+          },
         },
       }
     );

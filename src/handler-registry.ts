@@ -3,6 +3,7 @@ import {
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
+  ListPromptsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ApiClient } from './api-client.js';
@@ -15,7 +16,8 @@ import {
   ExtractUrlsHandler,
   ListQueueHandler,
   RunQueueHandler,
-		ClearQueueHandler,
+  ClearQueueHandler,
+  PromptsListHandler,
 } from './handlers/index.js';
 
 const COLLECTION_NAME = 'documentation';
@@ -42,6 +44,9 @@ export class HandlerRegistry {
     this.handlers.set('list_queue', new ListQueueHandler(this.server, this.apiClient));
     this.handlers.set('run_queue', new RunQueueHandler(this.server, this.apiClient));
     this.handlers.set('clear_queue', new ClearQueueHandler(this.server, this.apiClient));
+
+    // Setup prompts handler
+    this.handlers.set('prompts/list', new PromptsListHandler(this.server, this.apiClient));
   }
 
   private registerHandlers() {
@@ -137,6 +142,22 @@ export class HandlerRegistry {
         } as ToolDefinition,
       ],
     }));
+
+    // Register the prompts/list handler
+    this.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
+      const handler = this.handlers.get('prompts/list');
+      if (!handler) {
+        throw new McpError(
+          ErrorCode.MethodNotFound,
+          'Method prompts/list not found'
+        );
+      }
+
+      const response = await handler.handle(request.params);
+      // The response from the handler is a McpToolResponse with content
+      // We need to parse it back to the expected format for prompts/list
+      return { prompts: [] };
+    });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       await this.apiClient.initCollection(COLLECTION_NAME);
