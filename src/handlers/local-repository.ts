@@ -1,15 +1,16 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './base-handler.js';
-import { DocumentChunk, McpToolResponse, RepositoryConfig, IndexingStatus } from '../types.js';
+import { DocumentChunk, McpToolResponse, RepositoryConfig, IndexingStatus, FileIndexMetadata } from '../types.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { glob } from 'glob';
-import { fileTypeFromFile } from 'file-type';
+// import { fileTypeFromFile } from 'file-type'; // file-type might not be needed if we rely on extensions
 import { detectLanguage } from '../utils/language-detection.js';
 import { RepositoryConfigLoader } from '../utils/repository-config-loader.js';
 import { IndexingStatusManager } from '../utils/indexing-status-manager.js';
+import { getFileMetadataManager } from '../utils/file-metadata-manager.js';
 
 const COLLECTION_NAME = 'documentation';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,120 +157,190 @@ export class LocalRepositoryHandler extends BaseHandler {
   private async processRepository(config: RepositoryConfig): Promise<{
     chunks: DocumentChunk[],
     processedFiles: number,
-    skippedFiles: number
+    skippedFiles: number,
+    filesNeedingUpdate: number // For files that changed and need re-indexing
   }> {
+    const metadataManager = await getFileMetadataManager();
     const chunks: DocumentChunk[] = [];
-    let processedFiles = 0;
-    let skippedFiles = 0;
+    let processedFiles = 0; // Successfully processed and generated chunks for
+    let skippedFiles = 0;   // Skipped due to config, emptiness, or being unchanged
+    let filesNeedingUpdate = 0; // Files that were modified and will be re-indexed
+    let deletedFilesCount = 0; // Files found in metadata but not in the current scan
     let fileCounter = 0;
+    const repositoryId = config.name;
 
-    // Get all files matching the include/exclude patterns
+    // Load all existing metadata for this repository to compare against current files
+    const existingRepoMetadata = await metadataManager.getRepositoryMetadata(repositoryId);
+    const allKnownFileIdsInRepo = new Set(existingRepoMetadata ? Object.keys(existingRepoMetadata) : []);
+
     const files = await glob(config.include, {
       cwd: config.path,
       ignore: config.exclude,
       absolute: true,
       nodir: true,
     });
-    const totalFiles = files.length;
+    const totalFiles = files.length; // This is the count of files currently on disk
 
-    console.info(`[${config.name}] Found ${totalFiles} files to process based on include/exclude patterns.`);
+    console.info(`[${repositoryId}] Found ${totalFiles} files on disk to process based on include/exclude patterns.`);
     if (this.activeProgressToken) {
-      (this.server as any).sendProgress(this.activeProgressToken, { message: `Found ${totalFiles} files to process.` });
+      (this.server as any).sendProgress(this.activeProgressToken, { message: `Found ${totalFiles} files on disk to process.` });
     }
+
+    const currentFileIdsOnDisk = new Set<string>();
 
     for (const file of files) {
       fileCounter++;
+      const relativePath = path.relative(config.path, file);
+      const fileId = crypto.createHash('sha256').update(`${repositoryId}:${relativePath}`).digest('hex');
+      currentFileIdsOnDisk.add(fileId); // Keep track of files currently on disk
+
       try {
-        const relativePath = path.relative(config.path, file);
+        const stats = await fs.stat(file);
+        if (!stats.isFile()) {
+          skippedFiles++;
+          continue;
+        }
+        const lastModifiedTimestamp = stats.mtimeMs;
+
         const extension = path.extname(file);
         const fileTypeConfig = config.fileTypeConfig[extension];
 
-        // Skip files that should be excluded based on file type config
         if (fileTypeConfig && fileTypeConfig.include === false) {
+          console.debug(`[${repositoryId}] Skipping ${relativePath} due to file type exclusion.`);
           skippedFiles++;
           continue;
         }
 
-        // Read file content
         const content = await fs.readFile(file, 'utf-8');
-
-        // Skip empty files
         if (!content.trim()) {
+          console.debug(`[${repositoryId}] Skipping empty file ${relativePath}.`);
+          skippedFiles++;
+          // If an empty file had metadata, it means it was previously not empty.
+          // Treat as a modified file that is now empty.
+          const existingMetadata = await metadataManager.getFileMetadata(repositoryId, fileId);
+          if (existingMetadata) {
+            console.info(`[${repositoryId}] File ${relativePath} is now empty. Removing its Qdrant entries and metadata.`);
+            // TODO: Sub-Task 2: Implement deletion of old chunks from Qdrant for fileId
+            // This is where you'd call apiClient.deletePointsByFileId(fileId) or similar
+            console.warn(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${relativePath} (ID: ${fileId}) is now empty. Old Qdrant points should be deleted.`);
+            await metadataManager.removeFileMetadata(repositoryId, fileId);
+            // No new chunks to add, so it's effectively "deleted" from the index.
+          }
+          continue;
+        }
+
+        const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+        const existingMetadata = await metadataManager.getFileMetadata(repositoryId, fileId);
+
+        if (existingMetadata && existingMetadata.contentHash === contentHash && existingMetadata.lastModifiedTimestamp === lastModifiedTimestamp) {
+          console.debug(`[${repositoryId}] File ${relativePath} is unchanged. Skipping.`);
           skippedFiles++;
           continue;
         }
 
-        // Detect language for better processing
-        const language = detectLanguage(file, content);
+        if (existingMetadata) {
+          console.info(`[${repositoryId}] File ${relativePath} has changed. Marking for update.`);
+          filesNeedingUpdate++;
+          // TODO: Sub-Task 2: Implement deletion of old chunks from Qdrant for fileId
+          // This is where you'd call apiClient.deletePointsByFileId(fileId) or similar
+          console.warn(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${relativePath} (ID: ${fileId}) was modified. Old Qdrant points should be deleted before re-indexing.`);
+          // Deletion of old Qdrant points will happen before upserting new ones in processRepositoryAsync
+        } else {
+          console.info(`[${repositoryId}] New file ${relativePath}. Processing.`);
+        }
 
-        // Process the file content into chunks
+        const language = detectLanguage(file, content);
         const fileChunks = this.chunkFileContent(
           content,
           file,
           relativePath,
           config,
           language,
-          fileTypeConfig?.chunkStrategy || 'line'
+          fileTypeConfig?.chunkStrategy || 'line',
+          fileId // Pass fileId to chunkFileContent
         );
 
         chunks.push(...fileChunks);
         processedFiles++;
+
+        // Update metadata after successful processing of the file's content into chunks
+        const newMetadata: FileIndexMetadata = {
+          repositoryId,
+          fileId,
+          filePath: relativePath,
+          lastModifiedTimestamp,
+          contentHash,
+        };
+        await metadataManager.setFileMetadata(newMetadata);
+
         if (fileCounter % 50 === 0 && fileCounter > 0 && this.activeProgressToken) {
-          const percentageComplete = Math.round((fileCounter / totalFiles) * 33); // File processing is ~1/3 of the job
-          (this.server as any).sendProgress(this.activeProgressToken, { message: `Processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
-          console.info(`[${config.name}] Processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
+          const percentageComplete = Math.round((fileCounter / totalFiles) * 33);
+          (this.server as any).sendProgress(this.activeProgressToken, { message: `Scanned ${fileCounter} of ${totalFiles} files...`, percentageComplete });
+          console.info(`[${repositoryId}] Scanned ${fileCounter} of ${totalFiles} files... (${processedFiles} to process/update, ${skippedFiles} skipped)`);
         }
       } catch (error) {
-        console.error(`[${config.name}] Error processing file ${file}: ${error instanceof Error ? error.message : String(error)}`);
-        skippedFiles++;
+        console.error(`[${repositoryId}] Error processing file ${relativePath} (File ID: ${fileId}): ${error instanceof Error ? error.message : String(error)}`);
+        skippedFiles++; // Count errors as skipped for now
       }
     }
-    console.info(`[${config.name}] Completed file iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
 
-    return { chunks, processedFiles, skippedFiles };
+    // Identify deleted files: files in metadata but not in currentFileIdsOnDisk
+    for (const knownFileId of allKnownFileIdsInRepo) {
+      if (!currentFileIdsOnDisk.has(knownFileId)) {
+        const deletedMetadata = await metadataManager.getFileMetadata(repositoryId, knownFileId);
+        const deletedFilePath = deletedMetadata?.filePath || 'unknown path';
+        console.info(`[${repositoryId}] File ${deletedFilePath} (ID: ${knownFileId}) deleted from source. Removing from Qdrant and metadata.`);
+        // TODO: Sub-Task 2: Implement deletion of chunks from Qdrant for knownFileId
+        // This is where you'd call apiClient.deletePointsByFileId(knownFileId) or similar
+        console.warn(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${deletedFilePath} (ID: ${knownFileId}) was deleted. Qdrant points should be removed.`);
+        await metadataManager.removeFileMetadata(repositoryId, knownFileId);
+        deletedFilesCount++;
+      }
+    }
+
+    console.info(`[${repositoryId}] Completed file scan. New/Modified files to process: ${processedFiles}. Files skipped (unchanged/excluded/empty/error): ${skippedFiles}. Files deleted: ${deletedFilesCount}.`);
+    return { chunks, processedFiles, skippedFiles, filesNeedingUpdate }; // `deletedFilesCount` is handled, not returned directly to async processor yet
   }
 
   private chunkFileContent(
     content: string,
-    filePath: string,
+    filePath: string, // full absolute path
     relativePath: string,
     config: RepositoryConfig,
     language: string,
-    chunkStrategy: string
+    chunkStrategy: string,
+    fileId: string // Added fileId
   ): DocumentChunk[] {
     const chunks: DocumentChunk[] = [];
     const timestamp = new Date().toISOString();
-    const fileUrl = `file://${filePath}`;
-    const title = `${config.name}/${relativePath}`;
+    const fileUrl = `file://${filePath}`; // URL for the absolute file path
+    const title = `${config.name}/${relativePath}`; // Title using repository name and relative path
 
-    // Different chunking strategies based on file type
     let textChunks: string[] = [];
 
     switch (chunkStrategy) {
       case 'semantic':
-        // For semantic chunking, we'd ideally use a more sophisticated approach
-        // For now, we'll use a simple paragraph-based approach
         textChunks = this.chunkByParagraphs(content, config.chunkSize);
         break;
       case 'line':
-        // Chunk by lines, respecting max chunk size
         textChunks = this.chunkByLines(content, config.chunkSize);
         break;
       default:
-        // Default to simple text chunking
         textChunks = this.chunkText(content, config.chunkSize);
     }
 
-    // Create document chunks with metadata
     chunks.push(...textChunks.map((text, index) => ({
       text,
-      url: fileUrl,
+      url: fileUrl, // Store the absolute file path as URL
       title,
       timestamp,
-      filePath: relativePath,
+      filePath: relativePath, // Store relative path in filePath field
       language,
       chunkIndex: index,
       totalChunks: textChunks.length,
+      repository: config.name, // Add repository name
+      isRepositoryFile: true,  // Mark as repository file
+      fileId, // Add fileId to each chunk
     })));
 
     return chunks;
@@ -372,32 +443,43 @@ export class LocalRepositoryHandler extends BaseHandler {
    * Process repository asynchronously to avoid MCP timeout
    */
   private async processRepositoryAsync(config: RepositoryConfig, progressToken?: string | number): Promise<void> {
+    const repositoryId = config.name;
     try {
-      // Mark this repository as being processed
-      LocalRepositoryHandler.activeIndexingProcesses.set(config.name, true);
-
-      // Update status to processing
+      LocalRepositoryHandler.activeIndexingProcesses.set(repositoryId, true);
       await this.statusManager.updateStatus({
-        repositoryName: config.name,
+        repositoryName: repositoryId,
         status: 'processing'
       });
 
-      console.info(`[${config.name}] Starting to process repository files asynchronously...`);
+      console.info(`[${repositoryId}] Starting to process repository files asynchronously...`);
 
-      // Process the repository files
-      const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
+      // Process the repository files, check metadata, calculate hashes
+      const { chunks, processedFiles, skippedFiles, filesNeedingUpdate } = await this.processRepository(config);
+      // `processedFiles` now means files that generated new chunks (new or updated)
+      // `skippedFiles` means files that were unchanged, excluded by config, or empty/errored.
 
-      // Update status with file processing results
+      // TODO: Sub-Task 2: Before upserting, delete points from Qdrant for `filesNeedingUpdate`
+      // This needs careful handling. If a file was updated, its old chunks (associated with its fileId)
+      // must be deleted from Qdrant. This should happen *before* new chunks are added.
+      // For now, this is a placeholder. The actual deletion logic will be added in Sub-Task 2.
+      if (filesNeedingUpdate > 0) {
+        console.info(`[${repositoryId}] ${filesNeedingUpdate} files were modified and their old Qdrant entries should be deleted before re-indexing.`);
+        // Placeholder for Qdrant deletion logic based on fileIds of updated files.
+        // This would involve iterating through the files identified as "updated" during processRepository,
+        // collecting their fileIds, and then calling a Qdrant delete operation with a filter for those fileIds.
+      }
+
+
       await this.statusManager.updateStatus({
-        repositoryName: config.name,
-        totalFiles: processedFiles + skippedFiles,
-        processedFiles,
-        skippedFiles,
-        totalChunks: chunks.length,
-        percentageComplete: 33
+        repositoryName: repositoryId,
+        totalFiles: processedFiles + skippedFiles, // Total files scanned
+        processedFiles, // Files that resulted in new/updated chunks
+        skippedFiles,   // Unchanged, excluded, empty, errored
+        totalChunks: chunks.length, // Chunks from new/updated files
+        percentageComplete: 33 // Mark file scanning phase as 33%
       });
 
-      console.info(`[${config.name}] Finished processing repository files. Found ${chunks.length} chunks from ${processedFiles} files (${skippedFiles} skipped).`);
+      console.info(`[${repositoryId}] File scanning complete. New/updated files processed: ${processedFiles}. Files skipped: ${skippedFiles}. Total chunks to index: ${chunks.length}.`);
 
       // Batch process chunks with smaller batch size for better responsiveness
       const batchSize = LocalRepositoryHandler.BATCH_SIZE;

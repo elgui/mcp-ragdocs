@@ -9,6 +9,7 @@ export interface DocumentChunk {
   totalChunks?: number;
   repository?: string;
   isRepositoryFile?: boolean;
+  fileId?: string; // Unique ID for the file, linking chunks to their source file metadata
 }
 
 export interface DocumentPayload extends DocumentChunk {
@@ -78,4 +79,12 @@ export interface IndexingStatus {
   percentageComplete?: number;
   error?: string;
   lastUpdated: string;
+}
+
+export interface FileIndexMetadata {
+  filePath: string; // Path relative to the repository root
+  fileId: string; // Unique ID for the file (e.g., hash of repositoryId + filePath)
+  repositoryId: string; // Identifier for the repository (e.g., name from RepositoryConfig)
+  lastModifiedTimestamp: number; // Timestamp of last modification
+  contentHash: string; // Hash of the file content
 }

@@ -100,3 +100,53 @@ Server logs provide valuable debugging information. MCP servers typically redire
     - Better progress reporting with detailed status information
     - Status persistence across server restarts
     - Ability to monitor multiple concurrent indexing operations
+
+### Planned Indexing Enhancements
+
+#### Persistent Indexing State and Incremental Updates (In Progress)
+- **Objective**: Avoid re-indexing unchanged files on server/client restarts and efficiently update the Qdrant index when source files change.
+- **Current Status (Sub-Task 1 Implementation):**
+    - **`FileIndexMetadata` Interface**: Defined in `src/types.ts` to structure metadata (includes `filePath`, `fileId`, `repositoryId`, `lastModifiedTimestamp`, `contentHash`).
+    - **`FileMetadataManager`**: Implemented in `src/utils/file-metadata-manager.ts`. Manages loading from and saving to `metadata/index_metadata.json`. Provides methods to get, set, and remove metadata. Initializes by creating the metadata file if it doesn't exist.
+    - **Core Indexing Logic Modified (`src/handlers/local-repository.ts`)**:
+        - **Integration**: `FileMetadataManager` is now used within `processRepository`.
+        - **File Hashing & Timestamps**: For each file, its content hash (`crypto.createHash('sha256')`) and last modified timestamp (`fs.stat().mtimeMs`) are obtained.
+        - **`fileId` Generation**: A unique `fileId` (hash of `repositoryId:relativePath`) is generated for each file.
+        - **Metadata Comparison**:
+            - **Unchanged Files**: If current `contentHash` and `lastModifiedTimestamp` match stored metadata for the `fileId`, the file is skipped, and a debug message is logged.
+            - **New/Modified Files**: If no metadata exists, or if it differs, the file is processed.
+        - **Metadata Update**: After successfully processing a new or modified file (i.e., its content is chunked), its metadata (including the new `contentHash` and `lastModifiedTimestamp`) is saved using `FileMetadataManager.setFileMetadata()`.
+        - **`fileId` in Chunks**: The `fileId` is now added to each `DocumentChunk` generated from a file. This is crucial for linking chunks back to their source file for future updates/deletions in Qdrant.
+    - **Type Definitions**: `@types/node` installed for Node.js specific types like `process`. Import paths updated to use `.js` extension where necessary (e.g., `../types.js`).
+- **Key Components & Flow (Original Plan - parts implemented as above):**
+    - **Metadata Storage**:
+        - **Implemented**: A persistent store (local JSON file `metadata/index_metadata.json`) maintains metadata for each indexed file.
+        - **Implemented**: Metadata includes `filePath`, `lastModifiedTimestamp`, `contentHash`, `repositoryId`, and a unique `fileId`.
+    - **Core Indexing Logic Modification**:
+        - **Implemented**: On Startup/Repository Scan:
+            - `FileMetadataManager.getRepositoryMetadata()` is used to load all existing metadata for the repository.
+            - The system iterates through all files found by `glob` in the repository.
+            - A `Set` of `fileId`s from the current disk scan (`currentFileIdsOnDisk`) is created.
+            - This set is compared against a `Set` of `fileId`s from the loaded metadata (`allKnownFileIdsInRepo`).
+            - Files in `allKnownFileIdsInRepo` but not in `currentFileIdsOnDisk` are identified as deleted.
+            - For deleted files:
+                - A `QDRANT_DELETION_PENDING` warning is logged (actual Qdrant deletion is part of Sub-Task 2).
+                - Metadata for the deleted file is removed using `FileMetadataManager.removeFileMetadata()`.
+        - **Per File**:
+            - **Implemented**: Calculate current `contentHash` and get `lastModifiedTimestamp`.
+            - **Comparison with Metadata**:
+                - **Implemented**: **Unchanged**: If `contentHash` and `lastModifiedTimestamp` match stored metadata, the file is skipped.
+                - **Partially Implemented**: **Modified**: If metadata exists but details differ, the file is marked for update.
+                    - **Pending**: Deleting old entries from Qdrant associated with this `fileId`. (Part of Sub-Task 2 - `QDRANT_DELETION_PENDING` log added).
+                    - **Implemented**: Re-indexing the new content.
+                    - **Implemented**: Updating the metadata entry.
+                - **Implemented**: **New**: If no metadata exists for the file, it's indexed as new, and its metadata is stored.
+                - **Implemented**: **Deleted (from source)**: If a file in metadata is no longer found in the repository during a scan, its entries are marked for removal from Qdrant (`QDRANT_DELETION_PENDING` log) and its metadata entry is deleted. (Actual Qdrant deletion is part of Sub-Task 2).
+    - **Qdrant Integration for Updates (Sub-Task 2 - Pending)**:
+        - **Implemented (Prerequisite)**: Qdrant points (vectors) will store the `fileId` in their payload (via `DocumentChunk.fileId`).
+        - **Pending**: Implement a function to delete all Qdrant points associated with a specific `fileId` (e.g., `apiClient.deletePointsByFileId(fileId)`).
+        - **Pending**: Integrate this deletion logic into the main indexing flow.
+    - **Graceful Restarts (Sub-Task 3 - Partially Addressed by Metadata Loading)**:
+        - **Implemented (Foundation)**: The system loads metadata on startup via `FileMetadataManager.initialize()`.
+        - **Implemented (Foundation)**: The indexing process correctly uses this loaded metadata to avoid re-indexing unchanged files.
+        - **Pending**: Full handling of files deleted while the server was offline.

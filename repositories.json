@@ -1,8 +1,8 @@
 {
     "repositories": [
       {
-        "path": "/Users/guillaumeb/dev",
-        "name": "goali",
+        "path": "C:/TeleGUI",
+        "name": "guimote",
         "include": ["**/*.js", "**/*.ts", "**/*.md"],
         "exclude": ["**/node_modules/**", "**/.git/**"],
         "watchMode": true,
