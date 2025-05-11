@@ -5,7 +5,7 @@ import { McpToolResponse } from '../types.js';
 const COLLECTION_NAME = 'documentation';
 
 export class RemoveDocumentationHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.urls || !Array.isArray(args.urls) || args.urls.length === 0) {
       throw new McpError(ErrorCode.InvalidParams, 'urls must be a non-empty array');
     }

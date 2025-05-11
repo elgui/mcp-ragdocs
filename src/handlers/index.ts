@@ -14,3 +14,4 @@ export * from './list-repositories.js';
 export * from './remove-repository.js';
 export * from './update-repository.js';
 export * from './watch-repository.js';
+export * from './get-indexing-status.js';

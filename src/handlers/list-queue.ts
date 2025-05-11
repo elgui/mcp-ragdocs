@@ -15,7 +15,7 @@ export class ListQueueHandler extends BaseHandler {
     super(server, apiClient);
   }
 
-  async handle(_args: any) {
+  async handle(_args: any, callContext?: { progressToken?: string | number, requestId: string | number }) {
     try {
       // Check if queue file exists
       try {

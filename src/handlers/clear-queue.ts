@@ -7,7 +7,8 @@ export class ClearQueueHandler extends ClearQueueTool {
     super();
   }
 
-		async handle(args: any) {
+		async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }) {
+				// ClearQueueTool.execute doesn't use callContext, so we don't pass it.
 				return this.execute(args);
 		}
 }

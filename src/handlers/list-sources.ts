@@ -72,7 +72,7 @@ export class ListSourcesHandler extends BaseHandler {
     return output.join('\n');
   }
 
-  async handle(): Promise<McpToolResponse> {
+  async handle(args?: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     try {
       await this.apiClient.initCollection(COLLECTION_NAME);
       

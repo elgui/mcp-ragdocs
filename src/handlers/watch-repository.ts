@@ -20,7 +20,7 @@ export class WatchRepositoryHandler extends BaseHandler {
     this.updateHandler = new UpdateRepositoryHandler(server, apiClient);
   }
 
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.name || typeof args.name !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Repository name is required');
     }
@@ -66,7 +66,8 @@ export class WatchRepositoryHandler extends BaseHandler {
             // Update the repository index
             if (changedFiles.length > 0 || removedFiles.length > 0) {
               try {
-                await this.updateHandler.handle({ name: repoName });
+                // Pass the callContext along if it exists
+                await this.updateHandler.handle({ name: repoName }, callContext);
                 console.log(`Repository ${repoName} index updated successfully`);
               } catch (error) {
                 console.error(`Failed to update repository ${repoName} index:`, error);

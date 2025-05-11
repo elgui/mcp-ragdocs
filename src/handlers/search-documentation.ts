@@ -5,7 +5,7 @@ import { McpToolResponse, isDocumentPayload } from '../types.js';
 const COLLECTION_NAME = 'documentation';
 
 export class SearchDocumentationHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.query || typeof args.query !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Query is required');
     }

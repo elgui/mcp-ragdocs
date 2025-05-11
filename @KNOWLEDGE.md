@@ -71,7 +71,32 @@ If tools are missing from client applications:
 4. Restart both server and client applications
 
 ### Server Logs
-Server logs provide valuable debugging information:
-- Tool registration issues
-- Client connection details
-- Request/response patterns
+Server logs provide valuable debugging information. MCP servers typically redirect `console.log`, `console.info`, `console.error`, etc., to `stderr` to avoid interfering with the JSON-RPC communication over `stdout`. When troubleshooting or monitoring:
+- Check `stderr` output for logs from handlers (e.g., progress during long operations like repository indexing).
+- Logs can reveal tool registration issues.
+- Client connection details are often logged.
+- Request/response patterns can be observed.
+- For long-running tools like `add_repository` and `update_repository`:
+  - Detailed progress logs are sent to `stderr` to act as a server-side heartbeat.
+  - MCP `$/progress` notifications are sent to the client to prevent request timeouts and provide client-side progress updates.
+  - **Timeout Issue Solution**: The timeout issue with large repositories has been addressed by implementing asynchronous processing:
+    - Repository indexing now runs in the background after initial setup
+    - The MCP request returns quickly with a success message, preventing timeout
+    - A new `get_indexing_status` tool allows checking the progress of ongoing indexing operations
+    - Batch size reduced from 100 to 50 chunks per batch for more frequent progress updates
+    - Status tracking implemented via the `IndexingStatusManager` class
+    - Detailed status information includes progress percentage, file counts, and timing data
+
+  - **Implementation Details**:
+    - Added `IndexingStatus` type to track indexing progress
+    - Created `IndexingStatusManager` class to manage status persistence
+    - Modified `LocalRepositoryHandler` to use asynchronous processing
+    - Added `processRepositoryAsync` method that runs in the background
+    - Created `GetIndexingStatusHandler` for checking indexing status
+    - Updated documentation to reflect the new asynchronous approach
+
+  - **Additional Improvements**:
+    - More robust error handling in batch processing
+    - Better progress reporting with detailed status information
+    - Status persistence across server restarts
+    - Ability to monitor multiple concurrent indexing operations

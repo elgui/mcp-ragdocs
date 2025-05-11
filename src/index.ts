@@ -55,9 +55,23 @@ class RagDocsServer {
 
   async run() {
     try {
-      // Redirect console.log to stderr to avoid interfering with JSON-RPC communication
+      // Redirect console methods to stderr to avoid interfering with JSON-RPC communication
+      const originalConsoleLog = console.log;
+      const originalConsoleInfo = console.info;
+      const originalConsoleWarn = console.warn;
+      const originalConsoleError = console.error;
+
       console.log = (...args) => {
-        process.stderr.write(args.join(' ') + '\n');
+        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
+      };
+      console.info = (...args) => {
+        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
+      };
+      console.warn = (...args) => {
+        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
+      };
+      console.error = (...args) => {
+        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
       };
 
       // Initialize Qdrant collection

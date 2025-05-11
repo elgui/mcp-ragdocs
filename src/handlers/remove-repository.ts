@@ -9,7 +9,7 @@ const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 const COLLECTION_NAME = 'documentation';
 
 export class RemoveRepositoryHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.name || typeof args.name !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Repository name is required');
     }

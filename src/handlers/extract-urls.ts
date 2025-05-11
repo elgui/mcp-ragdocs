@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 const QUEUE_FILE = path.join(__dirname, '..', '..', 'queue.txt');
 
 export class ExtractUrlsHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.url || typeof args.url !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'URL is required');
     }

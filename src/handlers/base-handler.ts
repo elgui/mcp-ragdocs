@@ -11,5 +11,5 @@ export abstract class BaseHandler {
     this.apiClient = apiClient;
   }
 
-  protected abstract handle(args: any): Promise<McpToolResponse>;
+  protected abstract handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse>;
 }

@@ -7,7 +7,7 @@ import crypto from 'crypto';
 const COLLECTION_NAME = 'documentation';
 
 export class AddDocumentationHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     if (!args.url || typeof args.url !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'URL is required');
     }

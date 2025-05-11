@@ -1,0 +1,2 @@
+- refer to KNOWLEDGE.md and README.md  for useful context
+- Keep those 2 files up-to-date after completing a task

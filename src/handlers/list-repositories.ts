@@ -7,7 +7,7 @@ import path from 'path';
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 
 export class ListRepositoriesHandler extends BaseHandler {
-  async handle(_args: any): Promise<McpToolResponse> {
+  async handle(_args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     try {
       // Ensure the config directory exists
       try {

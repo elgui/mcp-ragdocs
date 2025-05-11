@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './base-handler.js';
-import { DocumentChunk, McpToolResponse, RepositoryConfig } from '../types.js';
+import { DocumentChunk, McpToolResponse, RepositoryConfig, IndexingStatus } from '../types.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,6 +9,7 @@ import { glob } from 'glob';
 import { fileTypeFromFile } from 'file-type';
 import { detectLanguage } from '../utils/language-detection.js';
 import { RepositoryConfigLoader } from '../utils/repository-config-loader.js';
+import { IndexingStatusManager } from '../utils/indexing-status-manager.js';
 
 const COLLECTION_NAME = 'documentation';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -16,7 +17,21 @@ const REPO_CONFIG_DIR = path.join(__dirname, '..', 'repo-configs');
 const DEFAULT_CHUNK_SIZE = 1000;
 
 export class LocalRepositoryHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  private activeProgressToken: string | number | undefined;
+  private statusManager: IndexingStatusManager;
+  // Track active indexing processes
+  private static activeIndexingProcesses: Map<string, boolean> = new Map();
+  // Smaller batch size to reduce processing time per batch
+  private static BATCH_SIZE = 50;
+
+  constructor(server: any, apiClient: any) {
+    super(server, apiClient);
+    this.statusManager = new IndexingStatusManager();
+  }
+
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
+    this.activeProgressToken = callContext?.progressToken || callContext?.requestId;
+
     // Validate required parameters
     if (!args.path || typeof args.path !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Repository path is required');
@@ -74,60 +89,51 @@ export class LocalRepositoryHandler extends BaseHandler {
     };
 
     try {
+      // Check if indexing is already in progress for this repository
+      if (LocalRepositoryHandler.activeIndexingProcesses.has(config.name)) {
+        // Get current status
+        const status = await this.statusManager.getStatus(config.name);
+        if (status && status.status === 'processing') {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Repository indexing already in progress for ${config.name}.\n` +
+                      `Current progress: ${status.percentageComplete || 0}%\n` +
+                      `Files processed: ${status.processedFiles || 0} of ${status.totalFiles || 'unknown'}\n` +
+                      `Chunks indexed: ${status.indexedChunks || 0} of ${status.totalChunks || 'unknown'}\n` +
+                      `Started at: ${new Date(status.startTime).toLocaleString()}`
+              },
+            ],
+          };
+        }
+      }
+
       // Save the repository configuration
       await this.saveRepositoryConfig(config);
 
       // Update the repositories.json configuration file
       const configLoader = new RepositoryConfigLoader(this.server, this.apiClient);
       await configLoader.addRepositoryToConfig(config);
-
-      // Process the repository
-      const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
-
-      // Batch process chunks for better performance
-      const batchSize = 100;
-      let indexedChunks = 0;
-
-      for (let i = 0; i < chunks.length; i += batchSize) {
-        const batch = chunks.slice(i, i + batchSize);
-        const points = await Promise.all(
-          batch.map(async (chunk) => {
-            const embedding = await this.apiClient.getEmbeddings(chunk.text);
-            return {
-              id: this.generatePointId(),
-              vector: embedding,
-              payload: {
-                ...chunk,
-                _type: 'DocumentChunk' as const,
-                repository: config.name,
-                isRepositoryFile: true,
-              } as Record<string, unknown>,
-            };
-          })
-        );
-
-        await this.apiClient.qdrantClient.upsert(COLLECTION_NAME, {
-          wait: true,
-          points,
-        });
-
-        indexedChunks += batch.length;
+      console.info(`[${config.name}] Repository configuration saved and loaded.`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: "Repository configuration saved." });
       }
 
-      // If watch mode is enabled, start the watcher
-      if (config.watchMode) {
-        // This would be implemented in a separate class
-        // this.startRepositoryWatcher(config);
-      }
+      // Create initial status
+      await this.statusManager.createStatus(config.name);
+
+      // Start the indexing process asynchronously
+      this.processRepositoryAsync(config, this.activeProgressToken);
 
       return {
         content: [
           {
             type: 'text',
-            text: `Successfully indexed repository: ${config.name} (${repoPath})\n` +
-                  `Processed ${processedFiles} files, skipped ${skippedFiles} files\n` +
-                  `Created ${chunks.length} chunks, indexed ${indexedChunks} chunks\n` +
-                  `Watch mode: ${config.watchMode ? 'enabled' : 'disabled'}`,
+            text: `Repository configuration saved for ${config.name} (${repoPath}).\n` +
+                  `Indexing has started in the background and will continue after this response.\n` +
+                  `You can check the status using the 'get_indexing_status' tool with parameter name="${config.name}".\n` +
+                  `Watch mode: ${config.watchMode ? 'enabled' : 'disabled'}`
           },
         ],
       };
@@ -155,6 +161,7 @@ export class LocalRepositoryHandler extends BaseHandler {
     const chunks: DocumentChunk[] = [];
     let processedFiles = 0;
     let skippedFiles = 0;
+    let fileCounter = 0;
 
     // Get all files matching the include/exclude patterns
     const files = await glob(config.include, {
@@ -163,8 +170,15 @@ export class LocalRepositoryHandler extends BaseHandler {
       absolute: true,
       nodir: true,
     });
+    const totalFiles = files.length;
+
+    console.info(`[${config.name}] Found ${totalFiles} files to process based on include/exclude patterns.`);
+    if (this.activeProgressToken) {
+      (this.server as any).sendProgress(this.activeProgressToken, { message: `Found ${totalFiles} files to process.` });
+    }
 
     for (const file of files) {
+      fileCounter++;
       try {
         const relativePath = path.relative(config.path, file);
         const extension = path.extname(file);
@@ -200,11 +214,17 @@ export class LocalRepositoryHandler extends BaseHandler {
 
         chunks.push(...fileChunks);
         processedFiles++;
+        if (fileCounter % 50 === 0 && fileCounter > 0 && this.activeProgressToken) {
+          const percentageComplete = Math.round((fileCounter / totalFiles) * 33); // File processing is ~1/3 of the job
+          (this.server as any).sendProgress(this.activeProgressToken, { message: `Processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
+          console.info(`[${config.name}] Processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
+        }
       } catch (error) {
-        console.error(`Error processing file ${file}:`, error);
+        console.error(`[${config.name}] Error processing file ${file}: ${error instanceof Error ? error.message : String(error)}`);
         skippedFiles++;
       }
     }
+    console.info(`[${config.name}] Completed file iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
 
     return { chunks, processedFiles, skippedFiles };
   }
@@ -346,5 +366,152 @@ export class LocalRepositoryHandler extends BaseHandler {
 
   private generatePointId(): string {
     return crypto.randomBytes(16).toString('hex');
+  }
+
+  /**
+   * Process repository asynchronously to avoid MCP timeout
+   */
+  private async processRepositoryAsync(config: RepositoryConfig, progressToken?: string | number): Promise<void> {
+    try {
+      // Mark this repository as being processed
+      LocalRepositoryHandler.activeIndexingProcesses.set(config.name, true);
+
+      // Update status to processing
+      await this.statusManager.updateStatus({
+        repositoryName: config.name,
+        status: 'processing'
+      });
+
+      console.info(`[${config.name}] Starting to process repository files asynchronously...`);
+
+      // Process the repository files
+      const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
+
+      // Update status with file processing results
+      await this.statusManager.updateStatus({
+        repositoryName: config.name,
+        totalFiles: processedFiles + skippedFiles,
+        processedFiles,
+        skippedFiles,
+        totalChunks: chunks.length,
+        percentageComplete: 33
+      });
+
+      console.info(`[${config.name}] Finished processing repository files. Found ${chunks.length} chunks from ${processedFiles} files (${skippedFiles} skipped).`);
+
+      // Batch process chunks with smaller batch size for better responsiveness
+      const batchSize = LocalRepositoryHandler.BATCH_SIZE;
+      let indexedChunks = 0;
+      const totalChunks = chunks.length;
+      const totalBatches = Math.ceil(totalChunks / batchSize);
+
+      console.info(`[${config.name}] Starting to generate embeddings and index ${totalChunks} chunks in ${totalBatches} batches...`);
+
+      const COLLECTION_NAME = 'documentation';
+
+      for (let i = 0; i < totalChunks; i += batchSize) {
+        const batchChunks = chunks.slice(i, i + batchSize);
+        const currentBatch = Math.floor(i / batchSize) + 1;
+
+        // Update status before processing batch
+        await this.statusManager.updateStatus({
+          repositoryName: config.name,
+          currentBatch,
+          totalBatches,
+          indexedChunks,
+          percentageComplete: 33 + Math.round((i / totalChunks) * 66)
+        });
+
+        console.info(`[${config.name}] Processing batch ${currentBatch} of ${totalBatches}...`);
+
+        try {
+          const embeddingResults = await Promise.allSettled(
+            batchChunks.map(async (chunk) => {
+              try {
+                const embedding = await this.apiClient.getEmbeddings(chunk.text);
+                return {
+                  id: this.generatePointId(),
+                  vector: embedding,
+                  payload: {
+                    ...chunk,
+                    _type: 'DocumentChunk' as const,
+                    repository: config.name,
+                    isRepositoryFile: true,
+                  } as Record<string, unknown>,
+                };
+              } catch (embeddingError) {
+                console.error(`[${config.name}] Failed to generate embedding for chunk from ${chunk.filePath || chunk.url}: ${embeddingError instanceof Error ? embeddingError.message : String(embeddingError)}`);
+                throw embeddingError; // Re-throw to be caught by Promise.allSettled
+              }
+            })
+          );
+
+          const successfulPoints = embeddingResults
+            .filter(result => result.status === 'fulfilled')
+            .map(result => (result as PromiseFulfilledResult<any>).value);
+
+          const failedEmbeddingsCount = embeddingResults.filter(result => result.status === 'rejected').length;
+          if (failedEmbeddingsCount > 0) {
+            console.warn(`[${config.name}] Failed to generate embeddings for ${failedEmbeddingsCount} of ${batchChunks.length} chunks in batch ${currentBatch}.`);
+          }
+
+          if (successfulPoints.length > 0) {
+            try {
+              await this.apiClient.qdrantClient.upsert(COLLECTION_NAME, {
+                wait: true,
+                points: successfulPoints,
+              });
+              indexedChunks += successfulPoints.length;
+            } catch (upsertError) {
+              console.error(`[${config.name}] Failed to upsert batch ${currentBatch} of ${successfulPoints.length} points to Qdrant: ${upsertError instanceof Error ? upsertError.message : String(upsertError)}`);
+            }
+          }
+
+          const percentageComplete = 33 + Math.round(((i + batchChunks.length) / totalChunks) * 66);
+          console.info(`[${config.name}] Processed batch ${currentBatch} of ${totalBatches}. Successfully indexed in this batch: ${successfulPoints.length}. Total indexed so far: ${indexedChunks} chunks.`);
+
+          // Update status after processing batch
+          await this.statusManager.updateStatus({
+            repositoryName: config.name,
+            currentBatch,
+            totalBatches,
+            indexedChunks,
+            percentageComplete
+          });
+        } catch (batchError) {
+          console.error(`[${config.name}] Error processing batch ${currentBatch}:`, batchError);
+          // Continue with next batch despite errors
+        }
+      }
+
+      // Mark indexing as completed
+      console.info(`[${config.name}] Finished generating embeddings and indexing. Total indexed: ${indexedChunks} of ${totalChunks} chunks.`);
+
+      await this.statusManager.completeStatus(config.name, true, {
+        processedFiles,
+        skippedFiles,
+        totalChunks,
+        indexedChunks
+      });
+
+      // If watch mode is enabled, start the watcher
+      if (config.watchMode) {
+        // This would be implemented in a separate class
+        // this.startRepositoryWatcher(config);
+      }
+    } catch (error) {
+      console.error(`[${config.name}] Error during async repository processing:`, error);
+
+      // Update status to failed
+      await this.statusManager.completeStatus(
+        config.name,
+        false,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    } finally {
+      // Remove from active processes
+      LocalRepositoryHandler.activeIndexingProcesses.delete(config.name);
+    }
   }
 }

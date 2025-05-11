@@ -62,3 +62,20 @@ export interface RepositoryConfig {
     }
   }
 }
+
+export interface IndexingStatus {
+  repositoryName: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  startTime: string;
+  endTime?: string;
+  totalFiles?: number;
+  processedFiles?: number;
+  skippedFiles?: number;
+  totalChunks?: number;
+  indexedChunks?: number;
+  currentBatch?: number;
+  totalBatches?: number;
+  percentageComplete?: number;
+  error?: string;
+  lastUpdated: string;
+}

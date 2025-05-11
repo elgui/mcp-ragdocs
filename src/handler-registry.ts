@@ -25,6 +25,7 @@ import {
   RemoveRepositoryHandler,
   UpdateRepositoryHandler,
   WatchRepositoryHandler,
+  GetIndexingStatusHandler,
 } from './handlers/index.js';
 
 const COLLECTION_NAME = 'documentation';
@@ -59,6 +60,7 @@ export class HandlerRegistry {
     this.handlers.set('remove_repository', new RemoveRepositoryHandler(this.server, this.apiClient));
     this.handlers.set('update_repository', new UpdateRepositoryHandler(this.server, this.apiClient));
     this.handlers.set('watch_repository', new WatchRepositoryHandler(this.server, this.apiClient));
+    this.handlers.set('get_indexing_status', new GetIndexingStatusHandler(this.server, this.apiClient));
 
     // Setup prompts and resources handlers
     this.handlers.set('prompts/list', new PromptsListHandler(this.server, this.apiClient));
@@ -303,6 +305,20 @@ export class HandlerRegistry {
             required: ['name', 'action'],
           },
         } as ToolDefinition,
+        {
+          name: 'get_indexing_status',
+          description: 'Get the current status of repository indexing operations. This tool provides detailed information about ongoing or completed indexing processes, including progress percentage, file counts, and timing information.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Optional. The name of the repository to get status for. If not provided, returns status for all repositories.',
+              },
+            },
+            required: [],
+          },
+        } as ToolDefinition,
       ],
     }));
 
@@ -349,9 +365,16 @@ export class HandlerRegistry {
         );
       }
 
-      const response = await handler.handle(request.params.arguments);
+      // Extract progressToken or use requestId as fallback
+      const typedRequest = request as any; // Cast to any to access id
+      const callContext = {
+        progressToken: typedRequest.params._meta?.progressToken,
+        requestId: typedRequest.id
+      };
+
+      const response = await handler.handle(typedRequest.params.arguments, callContext);
       return {
-        _meta: {},
+        _meta: {}, // Ensure _meta is always present in the response
         ...response
       };
     });

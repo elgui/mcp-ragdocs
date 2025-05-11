@@ -65,6 +65,8 @@ An MCP server implementation that provides tools for retrieving and processing d
    - Index a local code repository for documentation
    - Configure include/exclude patterns for files and directories
    - Supports different chunking strategies based on file types
+   - Uses asynchronous processing to avoid MCP timeouts with large repositories
+   - Provides detailed progress logging (heartbeat) to `stderr` during indexing
    - Required parameter: `path` (absolute path to repository)
 
 10. **list_repositories**
@@ -74,6 +76,7 @@ An MCP server implementation that provides tools for retrieving and processing d
 11. **update_repository**
     - Re-index a repository with updated configuration
     - Can modify include/exclude patterns and other settings
+    - Provides detailed progress logging (heartbeat) to `stderr` during re-indexing
     - Required parameter: `name` (repository name)
 
 12. **remove_repository**
@@ -85,6 +88,12 @@ An MCP server implementation that provides tools for retrieving and processing d
     - Start or stop watching a repository for changes
     - Automatically updates the index when files change
     - Required parameters: `name` (repository name) and `action` ("start" or "stop")
+
+14. **get_indexing_status**
+    - Get the current status of repository indexing operations
+    - Provides detailed information about ongoing or completed indexing processes
+    - Shows progress percentage, file counts, and timing information
+    - Optional parameter: `name` (repository name) - if not provided, returns status for all repositories
 
 ## Quick Start
 
@@ -169,7 +178,8 @@ Add this to your `cline_mcp_settings.json`:
         "list_repositories",
         "update_repository",
         "remove_repository",
-        "watch_repository"
+        "watch_repository",
+        "get_indexing_status"
       ]
     }
   }
@@ -207,7 +217,8 @@ Add this to your `claude_desktop_config.json`:
         "list_repositories",
         "update_repository",
         "remove_repository",
-        "watch_repository"
+        "watch_repository",
+        "get_indexing_status"
       ]
     }
   }
@@ -274,7 +285,13 @@ The system supports indexing local code repositories, making their content searc
    - Code is chunked intelligently to preserve context
    - Metadata like file path and language are preserved
 
-3. **Change Detection**
+3. **Asynchronous Processing**
+   - Large repositories are processed asynchronously to avoid MCP timeouts
+   - Indexing continues in the background after the initial response
+   - Progress can be monitored using the `get_indexing_status` tool
+   - Smaller batch sizes (50 chunks per batch) improve responsiveness
+
+4. **Change Detection**
    - Repositories can be watched for changes
    - Modified files are automatically re-indexed
    - Deleted files are removed from the index
@@ -288,6 +305,25 @@ add_repository with {
   "exclude": ["**/node_modules/**", "**/dist/**"],
   "watchMode": true
 }
+```
+
+After starting the indexing process, you can check its status:
+```
+get_indexing_status with {
+  "name": "my-project"
+}
+```
+
+This will return detailed information about the indexing progress:
+```
+Repository: my-project
+Status: 🔄 Processing
+Progress: 45%
+Started: 5/11/2025, 2:45:30 PM
+Duration: 3m 15s
+Files: 120 processed, 15 skipped (of 250)
+Chunks: 1500 indexed (of 3300)
+Batch: 15 of 33
 ```
 
 ### Repository Configuration File
@@ -382,3 +418,16 @@ If certain tools (like `add_documentation`) are not appearing in Claude Desktop:
 5. Check the server logs for any errors related to tool registration
 
 The most common cause of missing tools is that they are registered as handlers but not included in the `tools` array returned by the `ListToolsRequestSchema` handler.
+
+### Timeout Issues with Large Repositories
+
+If you encounter timeout errors when indexing large repositories:
+
+1. The system now uses asynchronous processing to avoid MCP timeouts
+2. When adding a repository with `add_repository`, the indexing will continue in the background
+3. Use the `get_indexing_status` tool to monitor progress
+4. If you still experience issues, try these solutions:
+   - Reduce the scope of indexing with more specific include/exclude patterns
+   - Break up very large repositories into smaller logical units
+   - Increase the batch size in the code if your system has more resources available
+   - Check system resources (memory, CPU) during indexing to identify bottlenecks

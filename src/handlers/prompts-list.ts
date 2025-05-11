@@ -8,7 +8,7 @@ export class PromptsListHandler extends BaseHandler {
     super(server, apiClient);
   }
 
-  async handle(_args: any): Promise<McpToolResponse> {
+  async handle(_args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     // Return an empty list of prompts
     // This is a minimal implementation to prevent the error
     return {

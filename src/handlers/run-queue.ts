@@ -20,7 +20,7 @@ export class RunQueueHandler extends BaseHandler {
     this.addDocHandler = new AddDocumentationHandler(server, apiClient);
   }
 
-  async handle(_args: any): Promise<McpToolResponse> {
+  async handle(_args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
     try {
       // Check if queue file exists
       try {
@@ -53,7 +53,8 @@ export class RunQueueHandler extends BaseHandler {
         
         try {
           // Process the URL using add_documentation handler
-          await this.addDocHandler.handle({ url: currentUrl });
+          // Pass the callContext along if it exists
+          await this.addDocHandler.handle({ url: currentUrl }, callContext);
           processedCount++;
         } catch (error) {
           failedCount++;

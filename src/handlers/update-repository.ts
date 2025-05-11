@@ -12,7 +12,11 @@ const COLLECTION_NAME = 'documentation';
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 
 export class UpdateRepositoryHandler extends BaseHandler {
-  async handle(args: any): Promise<McpToolResponse> {
+  private activeProgressToken: string | number | undefined;
+
+  async handle(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
+    this.activeProgressToken = callContext?.progressToken || callContext?.requestId;
+
     if (!args.name || typeof args.name !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Repository name is required');
     }
@@ -56,11 +60,27 @@ export class UpdateRepositoryHandler extends BaseHandler {
       // Update the repositories.json configuration file
       const configLoader = new RepositoryConfigLoader(this.server, this.apiClient);
       await configLoader.addRepositoryToConfig(config);
+      console.info(`[${config.name}] Repository configuration updated and saved.`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: "Repository configuration updated." });
+      }
 
       // Process the repository
+      console.info(`[${config.name}] Starting to re-process repository files...`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: "Starting to re-process repository files..." });
+      }
       const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
+      console.info(`[${config.name}] Finished re-processing repository files. Found ${chunks.length} chunks from ${processedFiles} processed files (${skippedFiles} skipped).`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-processing files. Found ${chunks.length} chunks.`, percentageComplete: 25 }); // 25% for file processing
+      }
 
       // Remove existing repository documents from the vector database
+      console.info(`[${config.name}] Removing existing documents from vector database...`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: "Removing existing documents...", percentageComplete: 50 }); // 50% after deletion
+      }
       await this.apiClient.qdrantClient.delete(COLLECTION_NAME, {
         filter: {
           must: [
@@ -80,31 +100,67 @@ export class UpdateRepositoryHandler extends BaseHandler {
       // Batch process chunks for better performance
       const batchSize = 100;
       let indexedChunks = 0;
+      const totalChunks = chunks.length;
 
-      for (let i = 0; i < chunks.length; i += batchSize) {
-        const batch = chunks.slice(i, i + batchSize);
-        const points = await Promise.all(
-          batch.map(async (chunk) => {
-            const embedding = await this.apiClient.getEmbeddings(chunk.text);
-            return {
-              id: this.generatePointId(),
-              vector: embedding,
-              payload: {
-                ...chunk,
-                _type: 'DocumentChunk' as const,
-                repository: config.name,
-                isRepositoryFile: true,
-              } as Record<string, unknown>,
-            };
+      console.info(`[${config.name}] Starting to generate embeddings and re-index ${totalChunks} chunks...`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: `Starting to generate embeddings for ${totalChunks} chunks...`, percentageComplete: 50 });
+      }
+
+      for (let i = 0; i < totalChunks; i += batchSize) {
+        const batchChunks = chunks.slice(i, i + batchSize);
+
+        const embeddingResults = await Promise.allSettled(
+          batchChunks.map(async (chunk) => {
+            try {
+              const embedding = await this.apiClient.getEmbeddings(chunk.text);
+              return {
+                id: this.generatePointId(),
+                vector: embedding,
+                payload: {
+                  ...chunk,
+                  _type: 'DocumentChunk' as const,
+                  repository: config.name,
+                  isRepositoryFile: true,
+                } as Record<string, unknown>,
+              };
+            } catch (embeddingError) {
+              console.error(`[${config.name}] Failed to generate embedding for chunk from ${chunk.filePath || chunk.url} during update: ${embeddingError instanceof Error ? embeddingError.message : String(embeddingError)}`);
+              throw embeddingError; // Re-throw to be caught by Promise.allSettled
+            }
           })
         );
 
-        await this.apiClient.qdrantClient.upsert(COLLECTION_NAME, {
-          wait: true,
-          points,
-        });
+        const successfulPoints = embeddingResults
+          .filter(result => result.status === 'fulfilled')
+          .map(result => (result as PromiseFulfilledResult<any>).value);
 
-        indexedChunks += batch.length;
+        const failedEmbeddingsCount = embeddingResults.filter(result => result.status === 'rejected').length;
+        if (failedEmbeddingsCount > 0) {
+            console.warn(`[${config.name}] Failed to generate embeddings for ${failedEmbeddingsCount} of ${batchChunks.length} chunks in this batch during update.`);
+        }
+
+        if (successfulPoints.length > 0) {
+          try {
+            await this.apiClient.qdrantClient.upsert(COLLECTION_NAME, {
+              wait: true,
+              points: successfulPoints,
+            });
+            indexedChunks += successfulPoints.length;
+          } catch (upsertError) {
+            console.error(`[${config.name}] Failed to upsert batch of ${successfulPoints.length} points to Qdrant during update: ${upsertError instanceof Error ? upsertError.message : String(upsertError)}`);
+          }
+        }
+        
+        const percentageComplete = 50 + Math.round(((i + batchChunks.length) / totalChunks) * 50); // Remaining 50% for indexing
+        console.info(`[${config.name}] Re-processed batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalChunks / batchSize)}. Successfully re-indexed in this batch: ${successfulPoints.length}. Total re-indexed so far: ${indexedChunks} chunks.`);
+        if (this.activeProgressToken) {
+          (this.server as any).sendProgress(this.activeProgressToken, { message: `Re-processed ${i + batchChunks.length} of ${totalChunks} chunks for embedding/indexing. Successfully re-indexed: ${indexedChunks}.`, percentageComplete });
+        }
+      }
+      console.info(`[${config.name}] Finished generating embeddings and re-indexing. Total indexed: ${indexedChunks} chunks.`);
+      if (this.activeProgressToken) {
+        (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-indexing ${indexedChunks} chunks.`, percentageComplete: 100 });
       }
 
       return {
@@ -142,6 +198,7 @@ export class UpdateRepositoryHandler extends BaseHandler {
     const chunks: DocumentChunk[] = [];
     let processedFiles = 0;
     let skippedFiles = 0;
+    let fileCounter = 0;
 
     // Get all files matching the include/exclude patterns
     const files = await glob(config.include, {
@@ -150,8 +207,16 @@ export class UpdateRepositoryHandler extends BaseHandler {
       absolute: true,
       nodir: true,
     });
+    const totalFiles = files.length;
+
+    console.info(`[${config.name}] Found ${totalFiles} files to re-process based on include/exclude patterns.`);
+    if (this.activeProgressToken) {
+      (this.server as any).sendProgress(this.activeProgressToken, { message: `Found ${totalFiles} files to re-process.` });
+    }
+
 
     for (const file of files) {
+      fileCounter++;
       try {
         const relativePath = path.relative(config.path, file);
         const extension = path.extname(file);
@@ -187,11 +252,17 @@ export class UpdateRepositoryHandler extends BaseHandler {
 
         chunks.push(...fileChunks);
         processedFiles++;
+        if (fileCounter % 50 === 0 && fileCounter > 0 && this.activeProgressToken) {
+          const percentageComplete = Math.round((fileCounter / totalFiles) * 25); // File processing is ~1/4 of the job here
+          (this.server as any).sendProgress(this.activeProgressToken, { message: `Re-processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
+          console.info(`[${config.name}] Re-processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
+        }
       } catch (error) {
-        console.error(`Error processing file ${file}:`, error);
+        console.error(`[${config.name}] Error processing file ${file}:`, error);
         skippedFiles++;
       }
     }
+    console.info(`[${config.name}] Completed file re-iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
 
     return { chunks, processedFiles, skippedFiles };
   }
