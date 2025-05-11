@@ -55,8 +55,11 @@ An MCP server implementation that provides tools for retrieving and processing d
    - Useful for resetting the system
 
 8. **add_documentation**
-   - Add new documentation to the processing queue
-   - Supports various formats and sources
+   - Add new documentation directly to the system by providing a URL
+   - Automatically fetches, processes, and indexes the content
+   - Supports various web page formats and extracts relevant content
+   - Chunks content intelligently for optimal retrieval
+   - Required parameter: `url` (must include protocol, e.g., https://)
 
 ## Quick Start
 
@@ -160,7 +163,17 @@ Add this to your `claude_desktop_config.json`:
         "FALLBACK_PROVIDER": "openai", // recommended for reliability
         "FALLBACK_MODEL": "nomic-embed-text", // optional
         "QDRANT_URL": "http://localhost:6333"
-      }
+      },
+      "autoApprove": [
+        "search_documentation",
+        "list_sources",
+        "extract_urls",
+        "remove_documentation",
+        "list_queue",
+        "run_queue",
+        "clear_queue",
+        "add_documentation"
+      ]
     }
   }
 }
@@ -191,6 +204,27 @@ Note: The system will automatically use the appropriate vector dimensions based 
 - Ollama (nomic-embed-text): 768 dimensions
 - OpenAI (text-embedding-3-small): 1536 dimensions
 
+## Documentation Management
+
+### Direct vs. Queue-Based Documentation Addition
+
+The system provides two complementary approaches for adding documentation:
+
+1. **Direct Addition (`add_documentation` tool)**
+   - Immediately processes and indexes the documentation from a URL
+   - Best for adding individual documentation sources
+   - Provides immediate feedback on processing success/failure
+   - Example usage: `add_documentation` with `url: "https://example.com/docs"`
+
+2. **Queue-Based Processing**
+   - Add URLs to a processing queue (`extract_urls` with `add_to_queue: true`)
+   - Process multiple URLs in batch later (`run_queue`)
+   - Better for large-scale documentation ingestion
+   - Allows for scheduled processing of many documentation sources
+   - Provides resilience through the queue system
+
+Choose the approach that best fits your documentation management needs. For small numbers of important documents, direct addition provides immediate results. For large documentation sets or recursive crawling, the queue-based approach offers better scalability.
+
 ## Acknowledgments
 
 This project is a fork of [qpd-v/mcp-ragdocs](https://github.com/qpd-v/mcp-ragdocs), originally developed by qpd-v. The original project provided the foundation for this implementation.
@@ -218,3 +252,15 @@ lsof -i :3030
 ```
 
 4. You can also change the default port in the configuration if needed
+
+### Missing Tools in Claude Desktop
+
+If certain tools (like `add_documentation`) are not appearing in Claude Desktop:
+
+1. Verify that the tool is properly registered in the server's `handler-registry.ts` file
+2. Make sure the tool is included in the `ListToolsRequestSchema` handler response
+3. Check that your Claude Desktop configuration includes the tool in the `autoApprove` array
+4. Restart the Claude Desktop application and the MCP server
+5. Check the server logs for any errors related to tool registration
+
+The most common cause of missing tools is that they are registered as handlers but not included in the `tools` array returned by the `ListToolsRequestSchema` handler.

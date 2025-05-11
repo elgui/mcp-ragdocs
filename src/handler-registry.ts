@@ -75,6 +75,20 @@ export class HandlerRegistry {
           },
         } as ToolDefinition,
         {
+          name: 'add_documentation',
+          description: 'Add new documentation to the system by providing a URL. The tool will fetch the content, process it into chunks, and store it in the vector database for future searches. Supports various web page formats and automatically extracts relevant content.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              url: {
+                type: 'string',
+                description: 'The complete URL of the documentation to add (must include protocol, e.g., https://). The page must be publicly accessible.',
+              },
+            },
+            required: ['url'],
+          },
+        } as ToolDefinition,
+        {
           name: 'list_sources',
           description: 'List all documentation sources currently stored in the system. Returns a comprehensive list of all indexed documentation including source URLs, titles, and last update times. Use this to understand what documentation is available for searching or to verify if specific sources have been indexed.',
           inputSchema: {
