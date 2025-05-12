@@ -1,6 +1,7 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './base-handler.js';
 import { McpToolResponse, isDocumentPayload } from '../types.js';
+import { error } from '../utils/logger.js';
 
 const COLLECTION_NAME = 'documentation';
 
@@ -33,8 +34,8 @@ export class ListSourcesHandler extends BaseHandler {
           grouped[domain][subdomain] = [];
         }
         grouped[domain][subdomain].push(source);
-      } catch (error) {
-        console.error(`Invalid URL: ${source.url}`);
+      } catch (err) {
+        error(`Invalid URL: ${source.url}. Error: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -126,25 +127,28 @@ export class ListSourcesHandler extends BaseHandler {
           },
         ],
       };
-    } catch (error) {
-      if (error instanceof Error) {
-        if (error.message.includes('unauthorized')) {
+    } catch (err) {
+      if (err instanceof Error) {
+        if (err.message.includes('unauthorized')) {
+          error(`Failed to authenticate with Qdrant cloud while listing sources: ${err.message}`);
           throw new McpError(
             ErrorCode.InvalidRequest,
             'Failed to authenticate with Qdrant cloud while listing sources'
           );
-        } else if (error.message.includes('ECONNREFUSED') || error.message.includes('ETIMEDOUT')) {
+        } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ETIMEDOUT')) {
+          error(`Connection to Qdrant cloud failed while listing sources: ${err.message}`);
           throw new McpError(
             ErrorCode.InternalError,
             'Connection to Qdrant cloud failed while listing sources'
           );
         }
       }
+      error(`Failed to list sources: ${err instanceof Error ? err.message : String(err)}`);
       return {
         content: [
           {
             type: 'text',
-            text: `Failed to list sources: ${error}`,
+            text: `Failed to list sources. Check logs for details.`,
           },
         ],
         isError: true,

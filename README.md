@@ -406,28 +406,3 @@ lsof -i :3030
 ```
 
 4. You can also change the default port in the configuration if needed
-
-### Missing Tools in Claude Desktop
-
-If certain tools (like `add_documentation`) are not appearing in Claude Desktop:
-
-1. Verify that the tool is properly registered in the server's `handler-registry.ts` file
-2. Make sure the tool is included in the `ListToolsRequestSchema` handler response
-3. Check that your Claude Desktop configuration includes the tool in the `autoApprove` array
-4. Restart the Claude Desktop application and the MCP server
-5. Check the server logs for any errors related to tool registration
-
-The most common cause of missing tools is that they are registered as handlers but not included in the `tools` array returned by the `ListToolsRequestSchema` handler.
-
-### Timeout Issues with Large Repositories
-
-If you encounter timeout errors when indexing large repositories:
-
-1. The system now uses asynchronous processing to avoid MCP timeouts
-2. When adding a repository with `add_repository`, the indexing will continue in the background
-3. Use the `get_indexing_status` tool to monitor progress
-4. If you still experience issues, try these solutions:
-   - Reduce the scope of indexing with more specific include/exclude patterns
-   - Break up very large repositories into smaller logical units
-   - Increase the batch size in the code if your system has more resources available
-   - Check system resources (memory, CPU) during indexing to identify bottlenecks

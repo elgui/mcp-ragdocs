@@ -6,6 +6,7 @@ import path from 'path';
 import { RepositoryWatcher } from '../utils/repository-watcher.js';
 import { UpdateRepositoryHandler } from './update-repository.js';
 import { RepositoryConfigLoader } from '../utils/repository-config-loader.js';
+import { info, error } from '../utils/logger.js';
 
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 
@@ -61,16 +62,16 @@ export class WatchRepositoryHandler extends BaseHandler {
         const watcher = new RepositoryWatcher(
           config,
           async (changedFiles, removedFiles) => {
-            console.log(`Repository ${repoName} changed: ${changedFiles.length} files changed, ${removedFiles.length} files removed`);
+            info(`Repository ${repoName} changed: ${changedFiles.length} files changed, ${removedFiles.length} files removed`);
 
             // Update the repository index
             if (changedFiles.length > 0 || removedFiles.length > 0) {
               try {
                 // Pass the callContext along if it exists
                 await this.updateHandler.handle({ name: repoName }, callContext);
-                console.log(`Repository ${repoName} index updated successfully`);
-              } catch (error) {
-                console.error(`Failed to update repository ${repoName} index:`, error);
+                info(`Repository ${repoName} index updated successfully`);
+              } catch (err) {
+                error(`Failed to update repository ${repoName} index: ${err instanceof Error ? err.message : String(err)}`);
               }
             }
           }
@@ -130,15 +131,19 @@ export class WatchRepositoryHandler extends BaseHandler {
           ],
         };
       }
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
+    } catch (err) {
+      if (err instanceof McpError) {
+        // Log the MCP error before re-throwing
+        error(`MCP Error while trying to ${args.action} watching repository: ${err.message}`);
+        throw err;
       }
+      // Log the unexpected error using the logger
+      error(`Unexpected error while trying to ${args.action} watching repository: ${err instanceof Error ? err.message : String(err)}`);
       return {
         content: [
           {
             type: 'text',
-            text: `Failed to ${args.action} watching repository: ${error}`,
+            text: `Failed to ${args.action} watching repository. Check logs for details.`,
           },
         ],
         isError: true,

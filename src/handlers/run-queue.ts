@@ -6,6 +6,7 @@ import { AddDocumentationHandler } from './add-documentation.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { error } from '../utils/logger.js';
 
 // Get current directory in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -56,10 +57,10 @@ export class RunQueueHandler extends BaseHandler {
           // Pass the callContext along if it exists
           await this.addDocHandler.handle({ url: currentUrl }, callContext);
           processedCount++;
-        } catch (error) {
+        } catch (process_error) {
           failedCount++;
           failedUrls.push(currentUrl);
-          console.error(`Failed to process URL ${currentUrl}:`, error);
+          error(`Failed to process URL ${currentUrl}: ${process_error instanceof Error ? process_error.message : String(process_error)}`);
         }
 
         // Remove the processed URL from queue
@@ -80,12 +81,13 @@ export class RunQueueHandler extends BaseHandler {
           },
         ],
       };
-    } catch (error) {
+    } catch (err) {
+      error(`Failed to process queue: ${err instanceof Error ? err.message : String(err)}`);
       return {
         content: [
           {
             type: 'text',
-            text: `Failed to process queue: ${error}`,
+            text: `Failed to process queue. Check logs for details.`,
           },
         ],
         isError: true,

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { ApiClient } from '../api-client.js';
 import { AddDocumentationHandler } from '../handlers/add-documentation.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { error } from '../utils/logger.js';
 
 // Get current directory in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -75,10 +76,10 @@ export class RunQueueTool extends BaseTool {
           // Process the URL using the handler
           await this.addDocHandler.handle({ url: currentUrl });
           processedCount++;
-        } catch (error) {
+        } catch (processError) { // Renamed error variable here
           failedCount++;
           failedUrls.push(currentUrl);
-          console.error(`Failed to process URL ${currentUrl}:`, error);
+          error(`Failed to process URL ${currentUrl}: ${processError instanceof Error ? processError.message : String(processError)}`);
         }
 
         // Remove the processed URL from queue
@@ -99,12 +100,13 @@ export class RunQueueTool extends BaseTool {
           },
         ],
       };
-    } catch (error) {
+    } catch (err) {
+      error(`Failed to process queue: ${err instanceof Error ? err.message : String(err)}`);
       return {
         content: [
           {
             type: 'text',
-            text: `Failed to process queue: ${error}`,
+            text: `Failed to process queue. Check logs for details.`,
           },
         ],
         isError: true,

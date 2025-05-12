@@ -1,8 +1,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { fileURLToPath } from 'url'; // Import fileURLToPath
 import { FileIndexMetadata } from '../types.js';
+import { info, error, debug } from './logger.js';
 
-const METADATA_DIR = path.join(process.cwd(), 'metadata');
+const __dirname = path.dirname(fileURLToPath(import.meta.url)); // Add __dirname definition
+
+const METADATA_DIR = path.join(__dirname, '..', 'metadata'); // Use __dirname
 const METADATA_FILE_PATH = path.join(METADATA_DIR, 'index_metadata.json');
 
 // In-memory store for metadata, keyed by repositoryId, then by fileId
@@ -22,14 +26,14 @@ export class FileMetadataManager {
       await fs.mkdir(path.dirname(this.metadataFilePath), { recursive: true });
       const fileContent = await fs.readFile(this.metadataFilePath, 'utf-8');
       this.metadata = JSON.parse(fileContent) as AllRepositoriesMetadataStore;
-      console.info(`Loaded file index metadata from ${this.metadataFilePath}`);
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        console.info(`Metadata file ${this.metadataFilePath} not found. Initializing with empty metadata.`);
+      info(`Loaded file index metadata from ${this.metadataFilePath}`);
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        info(`Metadata file ${this.metadataFilePath} not found. Initializing with empty metadata.`);
         this.metadata = {};
         await this.saveMetadata(); // Create the file with empty data
       } else {
-        console.error(`Error loading metadata from ${this.metadataFilePath}:`, error);
+        error(`Error loading metadata from ${this.metadataFilePath}: ${err instanceof Error ? err.message : String(err)}`);
         // Decide if we should re-initialize or throw
         this.metadata = {};
       }
@@ -40,11 +44,11 @@ export class FileMetadataManager {
     try {
       const jsonData = JSON.stringify(this.metadata, null, 2);
       await fs.writeFile(this.metadataFilePath, jsonData, 'utf-8');
-      console.debug(`Saved file index metadata to ${this.metadataFilePath}`);
-    } catch (error) {
-      console.error(`Error saving metadata to ${this.metadataFilePath}:`, error);
+      debug(`Saved file index metadata to ${this.metadataFilePath}`);
+    } catch (err) {
+      error(`Error saving metadata to ${this.metadataFilePath}: ${err instanceof Error ? err.message : String(err)}`);
       // Potentially throw to indicate failure
-      throw error;
+      throw err;
     }
   }
 

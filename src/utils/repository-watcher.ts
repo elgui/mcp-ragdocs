@@ -3,6 +3,7 @@ import path from 'path';
 import { glob } from 'glob';
 import crypto from 'crypto';
 import { RepositoryConfig } from '../types.js';
+import { info, error } from './logger.js';
 
 interface FileState {
   path: string;
@@ -37,7 +38,7 @@ export class RepositoryWatcher {
       this.config.watchInterval
     );
 
-    console.log(`Started watching repository: ${this.config.name} (${this.config.path})`);
+    info(`Started watching repository: ${this.config.name} (${this.config.path})`);
   }
 
   /**
@@ -47,7 +48,7 @@ export class RepositoryWatcher {
     if (this.watchInterval) {
       clearInterval(this.watchInterval);
       this.watchInterval = null;
-      console.log(`Stopped watching repository: ${this.config.name}`);
+      info(`Stopped watching repository: ${this.config.name}`);
     }
   }
 
@@ -73,12 +74,12 @@ export class RepositoryWatcher {
           hash,
           lastModified: stats.mtimeMs,
         });
-      } catch (error) {
-        console.error(`Error initializing file state for ${file}:`, error);
+      } catch (err) {
+        error(`Error initializing file state for ${file}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    console.log(`Initialized file states for ${this.fileStates.size} files in repository: ${this.config.name}`);
+    info(`Initialized file states for ${this.fileStates.size} files in repository: ${this.config.name}`);
   }
 
   /**
@@ -126,8 +127,8 @@ export class RepositoryWatcher {
               });
             }
           }
-        } catch (error) {
-          console.error(`Error checking file ${file}:`, error);
+        } catch (err) {
+          error(`Error checking file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
@@ -142,18 +143,18 @@ export class RepositoryWatcher {
 
       // If there are changes, notify the callback
       if (changedFiles.length > 0 || removedFiles.length > 0) {
-        console.log(`Detected changes in repository ${this.config.name}:`);
+        info(`Detected changes in repository ${this.config.name}:`);
         if (changedFiles.length > 0) {
-          console.log(`- Changed files: ${changedFiles.length}`);
+          info(`- Changed files: ${changedFiles.length}`);
         }
         if (removedFiles.length > 0) {
-          console.log(`- Removed files: ${removedFiles.length}`);
+          info(`- Removed files: ${removedFiles.length}`);
         }
 
         await this.onFileChanged(changedFiles, removedFiles);
       }
-    } catch (error) {
-      console.error(`Error checking for changes in repository ${this.config.name}:`, error);
+    } catch (err) {
+      error(`Error checking for changes in repository ${this.config.name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

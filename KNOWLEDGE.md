@@ -60,8 +60,26 @@ Claude Desktop requires explicit configuration to recognize tools:
 - Tools registered as handlers but not included in the `ListToolsRequestSchema` response won't appear in clients
 - Changes to tool definitions require server restart
 - Client applications may cache tool listings, requiring restart
+- **Embedding Encoding Errors**: Addressed potential `TypeError [ERR_UNKNOWN_ENCODING]` during embedding generation by explicitly re-encoding text to UTF-8 using `Buffer.from(text, 'utf-8').toString('utf-8')` in the `generateEmbeddings` methods of `OllamaProvider` and `OpenAIProvider` in `src/services/embeddings.ts`. This aims to normalize text encoding before sending it to the embedding model.
+- **Client-side JSON Parsing Errors from Console Output**: `console.info()`, `console.debug()`, and `console.error()` calls in server-side code were causing `SyntaxError: Unexpected token... is not valid JSON` on the client. This is because their output was being sent over the same channel as the expected JSON-RPC messages. To address this, a simple logging utility (`src/utils/logger.ts`) has been implemented to redirect all server-side output, including potential logging errors, to a file (`mcp-ragdocs.log`) in the project root. All direct console calls in the following files have been replaced with calls to this logger:
+  - `src/handlers/watch-repository.ts`
+  - `src/handlers/run-queue.ts`
+  - `src/handlers/update-repository.ts`
+  - `src/handlers/list-sources.ts`
+  - `src/handlers/list-repositories.ts`
+  - `src/utils/repository-config-loader.ts`
+  - `src/api-client.ts`
+  - `src/utils/file-metadata-manager.ts`
+  - `src/tools/run-queue.ts`
+  - `src/utils/repository-watcher.ts`
+  - `src/services/embeddings.ts`
+  - `src/handlers/local-repository.ts`
+  - `src/index.ts`
 
 ## Troubleshooting
+
+### Embedding Service Availability
+- Added checks in `src/services/embeddings.ts` to ensure the configured embedding provider (Ollama or OpenAI) is available when the `EmbeddingService` is created. This makes the system more robust against issues with the embedding service not running or being inaccessible. For Ollama, a minimal `ollama.embeddings` call is used as a health check.
 
 ### Missing Tools
 If tools are missing from client applications:

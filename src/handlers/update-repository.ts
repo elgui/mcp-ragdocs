@@ -7,6 +7,7 @@ import { glob } from 'glob';
 import crypto from 'crypto';
 import { detectLanguage } from '../utils/language-detection.js';
 import { RepositoryConfigLoader } from '../utils/repository-config-loader.js';
+import { info, error, warn } from '../utils/logger.js';
 
 const COLLECTION_NAME = 'documentation';
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
@@ -60,18 +61,18 @@ export class UpdateRepositoryHandler extends BaseHandler {
       // Update the repositories.json configuration file
       const configLoader = new RepositoryConfigLoader(this.server, this.apiClient);
       await configLoader.addRepositoryToConfig(config);
-      console.info(`[${config.name}] Repository configuration updated and saved.`);
+      info(`[${config.name}] Repository configuration updated and saved.`);
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: "Repository configuration updated." });
       }
 
       // Process the repository
-      console.info(`[${config.name}] Starting to re-process repository files...`);
+      info(`[${config.name}] Starting to re-process repository files...`);
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: "Starting to re-process repository files..." });
       }
       const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
-      console.info(`[${config.name}] Finished re-processing repository files. Found ${chunks.length} chunks from ${processedFiles} processed files (${skippedFiles} skipped).`);
+      info(`[${config.name}] Finished re-processing repository files. Found ${chunks.length} chunks from ${processedFiles} processed files (${skippedFiles} skipped).`);
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-processing files. Found ${chunks.length} chunks.`, percentageComplete: 25 }); // 25% for file processing
       }
@@ -125,7 +126,7 @@ export class UpdateRepositoryHandler extends BaseHandler {
                 } as Record<string, unknown>,
               };
             } catch (embeddingError) {
-              console.error(`[${config.name}] Failed to generate embedding for chunk from ${chunk.filePath || chunk.url} during update: ${embeddingError instanceof Error ? embeddingError.message : String(embeddingError)}`);
+              error(`[${config.name}] Failed to generate embedding for chunk from ${chunk.filePath || chunk.url} during update: ${embeddingError instanceof Error ? embeddingError.message : String(embeddingError)}`);
               throw embeddingError; // Re-throw to be caught by Promise.allSettled
             }
           })
@@ -137,7 +138,7 @@ export class UpdateRepositoryHandler extends BaseHandler {
 
         const failedEmbeddingsCount = embeddingResults.filter(result => result.status === 'rejected').length;
         if (failedEmbeddingsCount > 0) {
-            console.warn(`[${config.name}] Failed to generate embeddings for ${failedEmbeddingsCount} of ${batchChunks.length} chunks in this batch during update.`);
+            warn(`[${config.name}] Failed to generate embeddings for ${failedEmbeddingsCount} of ${batchChunks.length} chunks in this batch during update.`);
         }
 
         if (successfulPoints.length > 0) {
@@ -148,17 +149,17 @@ export class UpdateRepositoryHandler extends BaseHandler {
             });
             indexedChunks += successfulPoints.length;
           } catch (upsertError) {
-            console.error(`[${config.name}] Failed to upsert batch of ${successfulPoints.length} points to Qdrant during update: ${upsertError instanceof Error ? upsertError.message : String(upsertError)}`);
+            error(`[${config.name}] Failed to upsert batch of ${successfulPoints.length} points to Qdrant during update: ${upsertError instanceof Error ? upsertError.message : String(upsertError)}`);
           }
         }
         
         const percentageComplete = 50 + Math.round(((i + batchChunks.length) / totalChunks) * 50); // Remaining 50% for indexing
-        console.info(`[${config.name}] Re-processed batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalChunks / batchSize)}. Successfully re-indexed in this batch: ${successfulPoints.length}. Total re-indexed so far: ${indexedChunks} chunks.`);
+        info(`[${config.name}] Re-processed batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalChunks / batchSize)}. Successfully re-indexed in this batch: ${successfulPoints.length}. Total re-indexed so far: ${indexedChunks} chunks.`);
         if (this.activeProgressToken) {
           (this.server as any).sendProgress(this.activeProgressToken, { message: `Re-processed ${i + batchChunks.length} of ${totalChunks} chunks for embedding/indexing. Successfully re-indexed: ${indexedChunks}.`, percentageComplete });
         }
       }
-      console.info(`[${config.name}] Finished generating embeddings and re-indexing. Total indexed: ${indexedChunks} chunks.`);
+      info(`[${config.name}] Finished generating embeddings and re-indexing. Total indexed: ${indexedChunks} chunks.`);
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-indexing ${indexedChunks} chunks.`, percentageComplete: 100 });
       }
@@ -257,12 +258,12 @@ export class UpdateRepositoryHandler extends BaseHandler {
           (this.server as any).sendProgress(this.activeProgressToken, { message: `Re-processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
           console.info(`[${config.name}] Re-processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
         }
-      } catch (error) {
-        console.error(`[${config.name}] Error processing file ${file}:`, error);
+      } catch (err) {
+        error(`[${config.name}] Error processing file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         skippedFiles++;
       }
     }
-    console.info(`[${config.name}] Completed file re-iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
+    info(`[${config.name}] Completed file re-iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
 
     return { chunks, processedFiles, skippedFiles };
   }

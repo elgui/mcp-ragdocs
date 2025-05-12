@@ -5,6 +5,7 @@ import { ApiClient } from "./api-client.js";
 import { HandlerRegistry } from "./handler-registry.js";
 import { WebInterface } from "./server.js";
 import { RepositoryConfigLoader } from "./utils/repository-config-loader.js";
+import { info, error } from "./utils/logger.js";
 
 const COLLECTION_NAME = "documentation";
 
@@ -40,7 +41,7 @@ class RagDocsServer {
     this.repoConfigLoader = new RepositoryConfigLoader(this.server, this.apiClient);
 
     // Error handling
-    this.server.onerror = (error) => console.error("[MCP Error]", error);
+    this.server.onerror = (err) => error(`[MCP Error] ${err}`);
     process.on("SIGINT", async () => {
       await this.cleanup();
       process.exit(0);
@@ -55,51 +56,35 @@ class RagDocsServer {
 
   async run() {
     try {
-      // Redirect console methods to stderr to avoid interfering with JSON-RPC communication
-      const originalConsoleLog = console.log;
-      const originalConsoleInfo = console.info;
-      const originalConsoleWarn = console.warn;
-      const originalConsoleError = console.error;
-
-      console.log = (...args) => {
-        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
-      };
-      console.info = (...args) => {
-        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
-      };
-      console.warn = (...args) => {
-        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
-      };
-      console.error = (...args) => {
-        process.stderr.write(args.map(arg => String(arg)).join(' ') + '\n');
-      };
+      // Initialize API client, including embedding service
+      await this.apiClient.initialize();
 
       // Initialize Qdrant collection
-      console.log("Initializing Qdrant collection...");
+      info("Initializing Qdrant collection...");
       await this.apiClient.initCollection(COLLECTION_NAME);
-      console.log("Qdrant collection initialized successfully");
+      info("Qdrant collection initialized successfully");
 
       // Start web interface
       await this.webInterface.start();
-      console.log("Web interface is running");
+      info("Web interface is running");
 
       // Load repositories from configuration
-      console.log("Loading repositories from configuration...");
+      info("Loading repositories from configuration...");
       await this.repoConfigLoader.loadRepositories();
 
       // Start MCP server
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      console.log("RAG Docs MCP server running on stdio");
-    } catch (error) {
-      process.stderr.write(`Failed to initialize server: ${error}\n`);
+      info("RAG Docs MCP server running on stdio");
+    } catch (err) {
+      error(`Failed to initialize server: ${err}`);
       process.exit(1);
     }
   }
 }
 
 const server = new RagDocsServer();
-server.run().catch((error) => {
-  process.stderr.write(`Fatal error: ${error}\n`);
+server.run().catch((err) => {
+  error(`Fatal error: ${err}`);
   process.exit(1);
 });

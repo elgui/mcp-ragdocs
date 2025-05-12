@@ -3,6 +3,7 @@ import { BaseHandler } from './base-handler.js';
 import { McpToolResponse, RepositoryConfig } from '../types.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { error } from '../utils/logger.js';
 
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 
@@ -12,8 +13,8 @@ export class ListRepositoriesHandler extends BaseHandler {
       // Ensure the config directory exists
       try {
         await fs.mkdir(REPO_CONFIG_DIR, { recursive: true });
-      } catch (error) {
-        console.error('Error creating repository config directory:', error);
+      } catch (err) {
+        error(`Error creating repository config directory: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Get all repository config files
@@ -53,8 +54,8 @@ export class ListRepositoriesHandler extends BaseHandler {
           const configContent = await fs.readFile(configPath, 'utf-8');
           const config = JSON.parse(configContent) as RepositoryConfig;
           repositories.push(config);
-        } catch (error) {
-          console.error(`Error loading repository config ${file}:`, error);
+        } catch (err) {
+          error(`Error loading repository config ${file}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 

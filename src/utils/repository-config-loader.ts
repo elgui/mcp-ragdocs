@@ -7,6 +7,7 @@ import { ApiClient } from '../api-client.js';
 import { UpdateRepositoryHandler } from '../handlers/update-repository.js';
 import { LocalRepositoryHandler } from '../handlers/local-repository.js';
 import { WatchRepositoryHandler } from '../handlers/watch-repository.js';
+import { info, error } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE_PATH = path.join(__dirname, '..', '..', 'repositories.json');
@@ -47,7 +48,7 @@ export class RepositoryConfigLoader {
       try {
         await fs.access(CONFIG_FILE_PATH);
       } catch {
-        console.log('No repositories.json configuration file found. Creating default configuration...');
+        info('No repositories.json configuration file found. Creating default configuration...');
         await this.createDefaultConfig();
         return;
       }
@@ -60,7 +61,7 @@ export class RepositoryConfigLoader {
       await fs.mkdir(REPO_CONFIG_DIR, { recursive: true });
 
       // Process each repository in the config
-      console.log(`Loading ${config.repositories.length} repositories from configuration...`);
+      info(`Loading ${config.repositories.length} repositories from configuration...`);
 
       for (const repoConfig of config.repositories) {
         try {
@@ -68,11 +69,11 @@ export class RepositoryConfigLoader {
           try {
             const stats = await fs.stat(repoConfig.path);
             if (!stats.isDirectory()) {
-              console.error(`Repository path is not a directory: ${repoConfig.path}`);
+              error(`Repository path is not a directory: ${repoConfig.path}`);
               continue;
             }
-          } catch {
-            console.error(`Repository path does not exist: ${repoConfig.path}`);
+          } catch (err) {
+            error(`Repository path does not exist: ${repoConfig.path}. Error: ${err instanceof Error ? err.message : String(err)}`);
             continue;
           }
 
@@ -89,30 +90,30 @@ export class RepositoryConfigLoader {
 
           if (isUpdate) {
             // Update existing repository
-            console.log(`Updating repository: ${repoConfig.name}`);
+            info(`Updating repository: ${repoConfig.name}`);
             await this.updateHandler.handle(repoConfig);
           } else {
             // Add new repository
-            console.log(`Adding repository: ${repoConfig.name}`);
+            info(`Adding repository: ${repoConfig.name}`);
             await this.addHandler.handle(repoConfig);
           }
 
           // Start watching if configured
           if (config.autoWatch && repoConfig.watchMode) {
-            console.log(`Starting watch for repository: ${repoConfig.name}`);
+            info(`Starting watch for repository: ${repoConfig.name}`);
             await this.watchHandler.handle({
               name: repoConfig.name,
               action: 'start'
             });
           }
-        } catch (error) {
-          console.error(`Error processing repository ${repoConfig.name}:`, error);
+        } catch (err) {
+          error(`Error processing repository ${repoConfig.name}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
-      console.log('Repositories loaded successfully from configuration');
-    } catch (error) {
-      console.error('Error loading repositories from configuration:', error);
+      info('Repositories loaded successfully from configuration');
+    } catch (err) {
+      error(`Error loading repositories from configuration: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -127,9 +128,9 @@ export class RepositoryConfigLoader {
 
     try {
       await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-      console.log(`Created default repositories configuration at ${CONFIG_FILE_PATH}`);
-    } catch (error) {
-      console.error('Error creating default configuration:', error);
+      info(`Created default repositories configuration at ${CONFIG_FILE_PATH}`);
+    } catch (err) {
+      error(`Error creating default configuration: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -150,8 +151,8 @@ export class RepositoryConfigLoader {
           const configContent = await fs.readFile(configPath, 'utf-8');
           const config = JSON.parse(configContent) as RepositoryConfig;
           repositories.push(config);
-        } catch (error) {
-          console.error(`Error loading repository config ${file}:`, error);
+        } catch (err) {
+          error(`Error loading repository config ${file}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
@@ -171,9 +172,9 @@ export class RepositoryConfigLoader {
       };
 
       await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(updatedConfig, null, 2), 'utf-8');
-      console.log(`Updated repositories configuration at ${CONFIG_FILE_PATH}`);
-    } catch (error) {
-      console.error('Error updating configuration file:', error);
+      info(`Updated repositories configuration at ${CONFIG_FILE_PATH}`);
+    } catch (err) {
+      error(`Error updating configuration file: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -203,9 +204,9 @@ export class RepositoryConfigLoader {
 
       // Update the config file
       await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(existingConfig, null, 2), 'utf-8');
-      console.log(`Added repository ${config.name} to configuration`);
-    } catch (error) {
-      console.error(`Error adding repository ${config.name} to configuration:`, error);
+      info(`Added repository ${config.name} to configuration`);
+    } catch (err) {
+      error(`Error adding repository ${config.name} to configuration: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -218,7 +219,7 @@ export class RepositoryConfigLoader {
       try {
         await fs.access(CONFIG_FILE_PATH);
       } catch {
-        console.log('No repositories.json configuration file found.');
+        info('No repositories.json configuration file found.');
         return;
       }
 
@@ -231,15 +232,15 @@ export class RepositoryConfigLoader {
       config.repositories = config.repositories.filter(repo => repo.name !== name);
 
       if (config.repositories.length === initialLength) {
-        console.log(`Repository ${name} not found in configuration`);
+        info(`Repository ${name} not found in configuration`);
         return;
       }
 
       // Update the config file
       await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf-8');
-      console.log(`Removed repository ${name} from configuration`);
-    } catch (error) {
-      console.error(`Error removing repository ${name} from configuration:`, error);
+      info(`Removed repository ${name} from configuration`);
+    } catch (err) {
+      error(`Error removing repository ${name} from configuration: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

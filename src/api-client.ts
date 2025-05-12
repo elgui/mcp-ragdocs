@@ -2,6 +2,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { chromium } from "playwright";
 import { EmbeddingService } from "./services/embeddings.js";
+import { warn } from './utils/logger.js';
 
 // Environment variables for configuration
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama';
@@ -25,14 +26,14 @@ if ((EMBEDDING_PROVIDER === 'openai' || FALLBACK_PROVIDER === 'openai') && !OPEN
 }
 
 if (EMBEDDING_PROVIDER === 'ollama') {
-  console.warn('Using Ollama as primary provider. Make sure Ollama is running locally.');
+  warn('Using Ollama as primary provider. Make sure Ollama is running locally.');
 }
 
 export class ApiClient {
   qdrantClient: QdrantClient;
-  embeddingService: EmbeddingService;
+  embeddingService!: EmbeddingService; // Use definite assignment assertion
   browser: any;
-  vectorSize: number;
+  vectorSize!: number; // Use definite assignment assertion
 
   constructor() {
     // Initialize Qdrant client with cloud configuration
@@ -40,9 +41,12 @@ export class ApiClient {
       url: QDRANT_URL,
       apiKey: QDRANT_API_KEY,
     });
+    // Embedding service and vector size will be initialized in the async initialize method
+  }
 
+  async initialize() {
     // Initialize embedding service with configured provider
-    this.embeddingService = EmbeddingService.createFromConfig({
+    this.embeddingService = await EmbeddingService.createFromConfig({
       provider: EMBEDDING_PROVIDER as 'ollama' | 'openai',
       apiKey: EMBEDDING_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
       model: EMBEDDING_MODEL,
