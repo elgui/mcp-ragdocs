@@ -26,6 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const nextPageBtn = document.getElementById('nextPageBtn');
     const currentPageSpan = document.getElementById('currentPage');
     const totalPagesSpan = document.getElementById('totalPages');
+    const llmStatusMessageDiv = document.getElementById('llmStatusMessage');
+    const llmStatusMessageSpan = llmStatusMessageDiv.querySelector('span');
+    
+    // DOM Elements for Local Repositories
+    const repoPathInput = document.getElementById('repoPath');
+    const addRepoBtn = document.getElementById('addRepoBtn');
+    const repositoriesList = document.getElementById('repositoriesList');
     
     // Track queue state for document updates
     let previousQueueState = [];
@@ -646,10 +653,184 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    // Update repositories list
+    async function updateRepositories() {
+        repositoriesList.innerHTML = '<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner fa-spin mr-2"></i>Loading repositories...</div>';
+        try {
+            const response = await fetch(`${API_BASE_URL}/repositories`);
+            if (!response.ok) throw new Error('Failed to fetch repositories');
+            
+            const repositories = await response.json();
+            displayRepositories(repositories);
+        } catch (error) {
+            console.error('Error fetching repositories:', error);
+            repositoriesList.innerHTML = '<div class="p-8 text-center text-red-500"><i class="fas fa-exclamation-circle mr-2"></i>Failed to load repositories</div>';
+        }
+    }
+    
+    // Display repositories
+    function displayRepositories(repositories) {
+        if (!Array.isArray(repositories) || repositories.length === 0) {
+            repositoriesList.innerHTML = '<div class="p-8 text-center text-slate-500">No local repositories added yet.</div>';
+            return;
+        }
+        
+        repositoriesList.innerHTML = repositories.map(repo => `
+            <div class="p-4 flex justify-between items-center hover:bg-slate-50 group">
+                <div class="flex-1">
+                    <div class="font-medium text-slate-700">${repo.name || 'Unnamed Repository'}</div>
+                    <div class="text-sm text-slate-500 truncate">${repo.path}</div>
+                    <div class="text-xs text-slate-400">Added: ${new Date(repo.timestamp).toLocaleString()}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="btn-secondary update-repo opacity-0 group-hover:opacity-100 transition-opacity" data-path="${repo.path}">
+                        <i class="fas fa-sync-alt"></i>
+                        <span class="tooltip">Update</span>
+                    </button>
+                    <button class="btn-danger remove-repo opacity-0 group-hover:opacity-100 transition-opacity" data-path="${repo.path}">
+                        <i class="fas fa-trash"></i>
+                        <span class="tooltip">Remove</span>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        
+        // Add event listeners for remove and update buttons
+        repositoriesList.querySelectorAll('.remove-repo').forEach(button => {
+            button.addEventListener('click', async () => {
+                const path = button.dataset.path;
+                if (!confirm(`Are you sure you want to remove the repository at "${path}"?`)) return;
+                
+                button.classList.add('deleting');
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing...';
+                
+                try {
+                    const response = await fetch(`${API_BASE_URL}/remove-repository`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ path })
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to remove repository');
+                    
+                    const result = await response.json();
+                    showToast(result.message);
+                    updateRepositories();
+                } catch (error) {
+                    console.error('Error removing repository:', error);
+                    showToast('Failed to remove repository', 'error');
+                    button.classList.remove('deleting');
+                    button.innerHTML = '<i class="fas fa-trash"></i><span class="tooltip">Click to remove</span>';
+                }
+            });
+        });
+
+        repositoriesList.querySelectorAll('.update-repo').forEach(button => {
+            button.addEventListener('click', async () => {
+                const path = button.dataset.path;
+                
+                setButtonLoading(button, true, 'Updating...');
+                
+                try {
+                    const response = await fetch(`${API_BASE_URL}/update-repository`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ path })
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to update repository');
+                    
+                    const result = await response.json();
+                    showToast(result.message);
+                    // No need to update the list immediately, status will be reflected in the queue
+                } catch (error) {
+                    console.error('Error updating repository:', error);
+                    showToast('Failed to update repository', 'error');
+                } finally {
+                    setButtonLoading(button, false);
+                }
+            });
+        });
+    }
+    
+    // Add repository
+    addRepoBtn.addEventListener('click', async () => {
+        const path = repoPathInput.value.trim();
+        if (!path) {
+            showToast('Please enter a repository path', 'error');
+            return;
+        }
+        
+        setButtonLoading(addRepoBtn, true, 'Adding repository...');
+        try {
+            const response = await fetch(`${API_BASE_URL}/watch-repository`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ path })
+            });
+            
+            if (!response.ok) throw new Error('Failed to add repository');
+            
+            const result = await response.json();
+            showToast(result.message);
+            repoPathInput.value = '';
+            updateRepositories(); // Refresh the list after adding
+            updateQueue(); // Update queue as adding a repo adds to the queue
+        } catch (error) {
+            console.error('Error adding repository:', error);
+            showToast('Failed to add repository', 'error');
+        } finally {
+            setButtonLoading(addRepoBtn, false);
+        }
+    });
+    
+    // Handle Enter key in repository path input
+    repoPathInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            addRepoBtn.click();
+        }
+    });
+    
+    // Fetch and display LLM availability status
+    async function checkLlmStatus() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/status`);
+            if (!response.ok) throw new Error('Failed to fetch status');
+            
+            const status = await response.json();
+            
+            if (!status.llmStatus.overallAvailable) {
+                let errorMessage = `No LLM providers available.`;
+                if (status.llmStatus.primary && !status.llmStatus.primary.available) {
+                    errorMessage += ` Primary (${status.llmStatus.primary.provider}) failed: ${status.llmStatus.primary.error}`;
+                }
+                if (status.llmStatus.fallback && !status.llmStatus.fallback.available) {
+                    errorMessage += ` Fallback (${status.llmStatus.fallback.provider}) failed: ${status.llmStatus.fallback.error}`;
+                }
+                llmStatusMessageSpan.textContent = errorMessage;
+                llmStatusMessageDiv.classList.remove('hidden');
+            } else {
+                llmStatusMessageDiv.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Error fetching LLM status:', error);
+            llmStatusMessageSpan.textContent = `Failed to fetch LLM status: ${error.message}`;
+            llmStatusMessageDiv.classList.remove('hidden');
+        }
+    }
+    
     // Initial updates
     updateQueue();
     updateDocuments();
+    updateRepositories(); // Load repositories on page load
+    checkLlmStatus(); // Check LLM status on page load
     
     // Start polling
     startQueuePolling();
-}); 
+});

@@ -41,6 +41,10 @@
   "homepage": "https://github.com/rahulretnan/mcp-ragdocs#readme",
   "dependencies": {
     "@azure/openai": "2.0.0",
+    "@langchain/community": "^0.3.42",
+    "@langchain/core": "^0.3.55",
+    "@langchain/mistralai": "^0.2.0",
+    "@langchain/openai": "^0.5.10",
     "@modelcontextprotocol/sdk": "1.0.3",
     "@qdrant/js-client-rest": "1.12.0",
     "axios": "^1.9.0",

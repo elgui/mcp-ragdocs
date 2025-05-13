@@ -2,14 +2,19 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { chromium } from "playwright";
 import { EmbeddingService } from "./services/embeddings.js";
+import { LLMService } from "./services/llm.js";
 import { warn } from './utils/logger.js';
 
 // Environment variables for configuration
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL;
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'mistral';
+const LLM_MODEL = process.env.LLM_MODEL;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FALLBACK_PROVIDER = process.env.FALLBACK_PROVIDER;
 const FALLBACK_MODEL = process.env.FALLBACK_MODEL;
+const LLM_FALLBACK_PROVIDER = process.env.LLM_FALLBACK_PROVIDER;
+const LLM_FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL;
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 
@@ -32,6 +37,7 @@ if (EMBEDDING_PROVIDER === 'ollama') {
 export class ApiClient {
   qdrantClient: QdrantClient;
   embeddingService!: EmbeddingService; // Use definite assignment assertion
+  llmService!: LLMService; // Use definite assignment assertion
   browser: any;
   vectorSize!: number; // Use definite assignment assertion
 
@@ -41,18 +47,28 @@ export class ApiClient {
       url: QDRANT_URL,
       apiKey: QDRANT_API_KEY,
     });
-    // Embedding service and vector size will be initialized in the async initialize method
+    // Embedding service, LLM service, and vector size will be initialized in the async initialize method
   }
 
   async initialize() {
     // Initialize embedding service with configured provider
     this.embeddingService = await EmbeddingService.createFromConfig({
-      provider: EMBEDDING_PROVIDER as 'ollama' | 'openai',
+      provider: EMBEDDING_PROVIDER as 'ollama' | 'openai' ,
       apiKey: EMBEDDING_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
       model: EMBEDDING_MODEL,
       fallbackProvider: FALLBACK_PROVIDER as 'ollama' | 'openai' | undefined,
       fallbackApiKey: FALLBACK_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
       fallbackModel: FALLBACK_MODEL
+    });
+
+    // Initialize LLM service with configured provider
+    this.llmService = await LLMService.createFromConfig({
+      provider: LLM_PROVIDER as 'ollama' | 'openai' | 'mistral',
+      apiKey: LLM_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
+      model: LLM_MODEL,
+      fallbackProvider: LLM_FALLBACK_PROVIDER as 'ollama' | 'openai' | 'mistral'| undefined,
+      fallbackApiKey: LLM_FALLBACK_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
+      fallbackModel: LLM_FALLBACK_MODEL
     });
 
     this.vectorSize = this.embeddingService.getVectorSize();
@@ -97,12 +113,24 @@ export class ApiClient {
             size: this.vectorSize, // Dynamic size based on provider
             distance: "Cosine",
           },
-          optimizers_config: {
+            optimizers_config: {
             default_segment_number: 2,
             memmap_threshold: 20000,
           },
           replication_factor: 2,
         });
+
+        // Create payload index for the 'repository' field after collection creation
+        await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+          field_name: 'repository',
+          field_schema: 'keyword'
+        });
+
+      } else {
+        // If collection exists, ensure the index is present (optional, but good practice)
+        // This part is more complex as it requires checking existing indexes and creating if missing.
+        // A more robust solution might check and create the index here if it's missing.
+        // For now, we assume the index exists if the collection exists.
       }
     } catch (error) {
       if (error instanceof Error) {

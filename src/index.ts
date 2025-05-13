@@ -13,7 +13,7 @@ class RagDocsServer {
   private server: Server;
   private apiClient: ApiClient;
   private handlerRegistry: HandlerRegistry;
-  private webInterface: WebInterface;
+  private webInterface?: WebInterface; // Make optional as it's initialized in run
   private repoConfigLoader: RepositoryConfigLoader;
 
   constructor() {
@@ -37,7 +37,6 @@ class RagDocsServer {
 
     this.apiClient = new ApiClient();
     this.handlerRegistry = new HandlerRegistry(this.server, this.apiClient);
-    this.webInterface = new WebInterface(this.apiClient);
     this.repoConfigLoader = new RepositoryConfigLoader(this.server, this.apiClient);
 
     // Error handling
@@ -50,13 +49,15 @@ class RagDocsServer {
 
   private async cleanup() {
     await this.apiClient.cleanup();
-    await this.webInterface.stop();
+    if (this.webInterface) { // Check if webInterface was initialized
+      await this.webInterface.stop();
+    }
     await this.server.close();
   }
 
   async run() {
     try {
-      // Initialize API client, including embedding service
+      // Initialize API client, including embedding and LLM services
       await this.apiClient.initialize();
 
       // Initialize Qdrant collection
@@ -64,7 +65,11 @@ class RagDocsServer {
       await this.apiClient.initCollection(COLLECTION_NAME);
       info("Qdrant collection initialized successfully");
 
-      // Start web interface
+      // Initialize and start web interface after API client is ready
+      if (!this.apiClient.llmService) {
+         throw new Error("LLM Service not initialized in ApiClient");
+      }
+      this.webInterface = new WebInterface(this.apiClient, this.apiClient.llmService);
       await this.webInterface.start();
       info("Web interface is running");
 

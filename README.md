@@ -23,6 +23,12 @@ An MCP server implementation that provides tools for retrieving and processing d
 
    - Search through the documentation using vector search
    - Returns relevant chunks of documentation with source information
+   - Enhanced with LLM processing to confirm relevance and synthesize content
+   - Supports JSON or text output formats
+   - Optional parameters:
+     - `useChain`: Whether to use LLM chain for processing (default: true)
+     - `synthesizeFullContent`: Whether to read and synthesize full document content (default: true)
+     - `returnFormat`: Format to return results in ('json' or 'text', default: 'json')
 
 2. **list_sources**
 
@@ -126,17 +132,23 @@ The system includes a web interface that can be accessed after starting the Dock
 1. Open your browser and navigate to: `http://localhost:3030`
 2. The interface provides:
    - Real-time queue monitoring
-   - Documentation source management
+   - Documentation source management (URLs and Local Repositories)
    - Search interface for testing queries
    - System status and health checks
+   - **Management of Local Repositories** (Add, List, Update, Remove)
 
 ## Configuration
+
+When launching the MCP server, the configuration for services like Embeddings and LLMs is primarily controlled by environment variables. There are two main ways these environment variables are provided:
+
+1.  **Direct Launch (.env file)**: When you run the server directly (e.g., using `npm start` or `node build/index.js`), it loads environment variables from the `.env` file at the root of the project directory. This is typically the method used when interacting with the server via the Web Interface.
+2.  **MCP Client Configuration**: When the server is launched by an MCP client like Cline or Claude Desktop, the client can provide environment variables through its configuration file (e.g., `cline_mcp_settings.json` or `claude_desktop_config.json`). **Environment variables set in the client's configuration file take precedence over those in the root `.env` file for the server process.**
 
 ### Embeddings Configuration
 
 The system uses Ollama as the default embedding provider for local embeddings generation, with OpenAI available as a fallback option. This setup prioritizes local processing while maintaining reliability through cloud-based fallback.
 
-#### Environment Variables
+#### Embedding Environment Variables
 
 - `EMBEDDING_PROVIDER`: Choose the primary embedding provider ('ollama' or 'openai', default: 'ollama')
 - `EMBEDDING_MODEL`: Specify the model to use (optional)
@@ -146,9 +158,25 @@ The system uses Ollama as the default embedding provider for local embeddings ge
 - `FALLBACK_PROVIDER`: Optional backup provider ('ollama' or 'openai')
 - `FALLBACK_MODEL`: Optional model for fallback provider
 
+**Important Note on Model Compatibility**: Ensure that the model name specified for `EMBEDDING_MODEL` and `FALLBACK_MODEL` is compatible with the corresponding `EMBEDDING_PROVIDER` and `FALLBACK_PROVIDER`. Using a model name intended for one provider with a different provider (e.g., `nomic-embed-text` with OpenAI) will cause errors. Refer to the documentation of each provider for valid model names.
+
+### LLM Configuration
+
+The system uses a Large Language Model (LLM) for advanced processing of search results, including relevance confirmation and content synthesis. Like the embedding service, it supports both Ollama (local) and OpenAI (cloud) providers with fallback capabilities.
+
+#### LLM Environment Variables
+
+- `LLM_PROVIDER`: Choose the primary LLM provider ('ollama' or 'openai')
+- `LLM_MODEL`: Specify the model to use (optional)
+  - For OpenAI: defaults to 'gpt-3.5-turbo'
+  - For Ollama: defaults to 'llama3'
+- `OPENAI_API_KEY`: Required when using OpenAI as provider (shared with embedding service)
+- `LLM_FALLBACK_PROVIDER`: Optional backup provider ('ollama' or 'openai')
+- `LLM_FALLBACK_MODEL`: Optional model for fallback provider
+
 ### Cline Configuration
 
-Add this to your `cline_mcp_settings.json`:
+When launching the server via Cline, add this to your `cline_mcp_settings.json`:
 
 ```json
 {
@@ -157,11 +185,17 @@ Add this to your `cline_mcp_settings.json`:
       "command": "node",
       "args": ["/path/to/your/mcp-ragdocs/build/index.js"],
       "env": {
+        // Environment variables set here override those in a root .env file for the server process.
         "EMBEDDING_PROVIDER": "ollama", // default
         "EMBEDDING_MODEL": "nomic-embed-text", // optional
+        "LLM_PROVIDER": "ollama", // Change to "mistral" to use Mistral as primary
+        "LLM_MODEL": "llama3", // Optional: specify model (e.g., "mistral-small-latest" for Mistral)
         "OPENAI_API_KEY": "your-api-key-here", // required for fallback
+        "MISTRAL_API_KEY": "your-mistral-api-key-here", // Required if using Mistral as primary or fallback
         "FALLBACK_PROVIDER": "openai", // recommended for reliability
-        "FALLBACK_MODEL": "nomic-embed-text", // optional
+        "FALLBACK_MODEL": "text-embedding-3-small", // optional
+        "LLM_FALLBACK_PROVIDER": "openai", // recommended for reliability
+        "LLM_FALLBACK_MODEL": "gpt-3.5-turbo", // optional
         "QDRANT_URL": "http://localhost:6333"
       },
       "disabled": false,
@@ -188,7 +222,7 @@ Add this to your `cline_mcp_settings.json`:
 
 ### Claude Desktop Configuration
 
-Add this to your `claude_desktop_config.json`:
+When launching the server via Claude Desktop, add this to your `claude_desktop_config.json`:
 
 ```json
 {
@@ -197,11 +231,17 @@ Add this to your `claude_desktop_config.json`:
       "command": "node",
       "args": ["/path/to/your/mcp-ragdocs/build/index.js"],
       "env": {
+        // Environment variables set here override those in a root .env file for the server process.
         "EMBEDDING_PROVIDER": "ollama", // default
         "EMBEDDING_MODEL": "nomic-embed-text", // optional
+        "LLM_PROVIDER": "ollama", // Change to "mistral" to use Mistral as primary
+        "LLM_MODEL": "llama3", // Optional: specify model (e.g., "mistral-small-latest" for Mistral)
         "OPENAI_API_KEY": "your-api-key-here", // required for fallback
+        "MISTRAL_API_KEY": "your-mistral-api-key-here", // Required if using Mistral as primary or fallback
         "FALLBACK_PROVIDER": "openai", // recommended for reliability
-        "FALLBACK_MODEL": "nomic-embed-text", // optional
+        "FALLBACK_MODEL": "text-embedding-3-small", // optional
+        "LLM_FALLBACK_PROVIDER": "openai", // recommended for reliability
+        "LLM_FALLBACK_MODEL": "gpt-3.5-turbo", // optional
         "QDRANT_URL": "http://localhost:6333"
       },
       "autoApprove": [
@@ -233,18 +273,22 @@ The system uses Ollama by default for efficient local embedding generation. For 
 2. Configure OpenAI as fallback (recommended):
    ```json
    {
-     // Ollama is used by default, no need to specify EMBEDDING_PROVIDER
+     // Ollama is used by default for both embedding and LLM
      "EMBEDDING_MODEL": "nomic-embed-text", // optional
+     "LLM_MODEL": "llama3", // optional
      "FALLBACK_PROVIDER": "openai",
      "FALLBACK_MODEL": "text-embedding-3-small",
+     "LLM_FALLBACK_PROVIDER": "openai",
+     "LLM_FALLBACK_MODEL": "gpt-3.5-turbo",
      "OPENAI_API_KEY": "your-api-key-here"
    }
    ```
 
 This configuration ensures:
-- Fast, local embedding generation with Ollama
+- Fast, local embedding generation and LLM processing with Ollama
 - Automatic fallback to OpenAI if Ollama fails
 - No external API calls unless necessary
+- Advanced search results with relevance confirmation and content synthesis
 
 Note: The system will automatically use the appropriate vector dimensions based on the provider:
 - Ollama (nomic-embed-text): 768 dimensions

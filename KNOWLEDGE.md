@@ -47,7 +47,32 @@ The system uses a handler registry pattern to manage tools. The key components a
    - `run_queue`: Processes all queued URLs
    - `clear_queue`: Empties the queue
 
+### Local Repository Management Tools
+
+1. **watch_repository**:
+   - Adds a local repository to be watched and indexed.
+   - Required parameter: `path`
+
+2. **list_repositories**:
+   - Lists all currently watched local repositories.
+
+3. **remove_repository**:
+   - Removes a local repository from the watch list and its indexed documentation.
+   - Required parameter: `path`
+
+4. **update_repository**:
+   - Triggers an update/re-indexing of a specific local repository.
+   - Required parameter: `path`
+
 ## Client Integration
+
+### Web Interface
+A basic web interface is available at `src/public/index.html` and `src/public/app.js` for interacting with the MCP server. It provides functionality for:
+- Adding documentation via URL
+- Managing the processing queue
+- Searching documentation
+- Listing available documents
+- **Managing Local Repositories**
 
 ### Claude Desktop Configuration
 Claude Desktop requires explicit configuration to recognize tools:
@@ -65,7 +90,7 @@ Claude Desktop requires explicit configuration to recognize tools:
   - `src/handlers/watch-repository.ts`
   - `src/handlers/run-queue.ts`
   - `src/handlers/update-repository.ts`
-  - `src/handlers/list-sources.ts`
+  - `src/handlers/list_sources.ts`
   - `src/handlers/list-repositories.ts`
   - `src/utils/repository-config-loader.ts`
   - `src/api-client.ts`
@@ -77,6 +102,12 @@ Claude Desktop requires explicit configuration to recognize tools:
   - `src/index.ts`
 
 ## Troubleshooting
+
+### Embedding Provider Configuration and Model Compatibility
+- **Valid Models**: Ensure you are using a valid embedding model name for the configured provider.
+    - **Ollama**: Use model names available in your local Ollama instance (e.g., `nomic-embed-text`, `llama2`). You can list available models using `ollama list`.
+    - **OpenAI**: Use valid OpenAI embedding model names (e.g., `text-embedding-3-small`, `text-embedding-3-large`).
+- **Configuration Mismatch**: Using a model name intended for one provider with a different provider (e.g., `nomic-embed-text` with OpenAI) will cause errors during initialization or embedding generation. Verify that the `EMBEDDING_MODEL` and `FALLBACK_MODEL` environment variables in your client configuration match the `EMBEDDING_PROVIDER` and `FALLBACK_PROVIDER` settings.
 
 ### Embedding Service Availability
 - Added checks in `src/services/embeddings.ts` to ensure the configured embedding provider (Ollama or OpenAI) is available when the `EmbeddingService` is created. This makes the system more robust against issues with the embedding service not running or being inaccessible. For Ollama, a minimal `ollama.embeddings` call is used as a health check.
@@ -118,6 +149,32 @@ Server logs provide valuable debugging information. MCP servers typically redire
     - Better progress reporting with detailed status information
     - Status persistence across server restarts
     - Ability to monitor multiple concurrent indexing operations
+
+### LLM Provider Configuration
+The primary LLM provider is determined by the `LLM_PROVIDER` environment variable. When the MCP server is launched via a client like Cline or Claude Desktop, environment variables defined in the server's configuration within the client's settings file (e.g., `cline_mcp_settings.json` or `claude_desktop_config.json`) take precedence over environment variables set in the system's environment or a root `.env` file.
+
+If you intend to use a specific LLM provider (e.g., Mistral) as the primary provider, ensure that `LLM_PROVIDER` is set to the desired provider name (e.g., "mistral") within the `env` block of the `rag-docs` server configuration in your client's settings file. Additionally, provide the necessary API key environment variable (e.g., `MISTRAL_API_KEY`) if required by the chosen provider.
+
+Example for `cline_mcp_settings.json` to use Mistral:
+```json
+{
+  "mcpServers": {
+    "rag-docs": {
+      "command": "node",
+      "args": ["/path/to/your/mcp-ragdocs/build/index.js"],
+      "env": {
+        // ... other env vars
+        "LLM_PROVIDER": "mistral",
+        "LLM_MODEL": "mistral-small-latest", // Optional: specify Mistral model
+        "MISTRAL_API_KEY": "your-mistral-api-key-here", // Required for Mistral
+        // ... fallback and other env vars
+      },
+      // ... other config
+    }
+  }
+}
+```
+Remember to replace `"your-mistral-api-key-here"` with your actual Mistral API key.
 
 ### Planned Indexing Enhancements
 

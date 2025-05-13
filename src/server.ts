@@ -12,6 +12,7 @@ import { RemoveDocumentationTool } from "./tools/remove-documentation.js";
 import { RunQueueTool } from "./tools/run-queue.js";
 import { SearchDocumentationTool } from "./tools/search-documentation.js";
 import { info, error } from './utils/logger.js';
+import { LLMService } from "./services/llm.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,6 +73,7 @@ export class WebInterface {
   private app: Application;
   private server: any;
   private apiClient: ApiClient;
+  private llmService: LLMService;
   private searchTool: SearchDocumentationTool;
   private runQueueTool: RunQueueTool;
   private listQueueTool: ListQueueTool;
@@ -81,8 +83,9 @@ export class WebInterface {
   private extractUrlsTool: ExtractUrlsTool;
   private queuePath: string;
 
-  constructor(apiClient: ApiClient) {
+  constructor(apiClient: ApiClient, llmService: LLMService) {
     this.apiClient = apiClient;
+    this.llmService = llmService;
     this.app = express();
     this.queuePath = join(rootDir, "queue.txt");
 
@@ -488,6 +491,43 @@ export class WebInterface {
         }
       }
     );
+
+    // File descriptions
+    this.app.post(
+      "/file-descriptions",
+      async (req: Request, res: Response, next: NextFunction) => {
+        try {
+          const { query, limit } = req.body;
+          if (!query) {
+            const error: ApiError = new Error("Query is required");
+            error.status = 400;
+            throw error;
+          }
+
+          // Call the search tool with generateFileDescriptions enabled
+          const response = await this.searchTool.execute({
+            query,
+            limit: limit || 10,
+            generateFileDescriptions: true,
+            returnFormat: 'json'
+          });
+
+          // Parse the JSON response
+          const result = JSON.parse(response.content[0].text);
+          res.json(result);
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    // Get server status (including LLM availability)
+    this.app.get("/status", (req: Request, res: Response) => {
+      res.json({
+        status: "ok", // Indicate server is running
+        llmStatus: this.llmService.getAvailabilityStatus(),
+      });
+    });
 
     this.app.use(errorHandler);
   }
