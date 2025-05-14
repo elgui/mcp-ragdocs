@@ -13,10 +13,12 @@ import { IndexingStatusManager } from '../utils/indexing-status-manager.js';
 import { getFileMetadataManager } from '../utils/file-metadata-manager.js';
 import { RepositoryWatcher } from '../utils/repository-watcher.js'; // Import RepositoryWatcher
 import { info, error, debug } from '../utils/logger.js';
+import { parseCodeFile } from '../utils/ast-parser.js';
+import { splitTextByTokens } from '../utils/token-counter.js';
+import { getCurrentCommitSha } from '../utils/git-utils.js';
 
 const COLLECTION_NAME = 'documentation';
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_CONFIG_DIR = path.join(__dirname, '..', 'repo-configs');
+const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 const DEFAULT_CHUNK_SIZE = 1000;
 
 export class LocalRepositoryHandler extends BaseHandler {
@@ -131,7 +133,7 @@ export class LocalRepositoryHandler extends BaseHandler {
       await this.statusManager.createStatus(config.name);
 
       // Start the indexing process asynchronously
-      this.processRepositoryAsync(config, this.activeProgressToken);
+      await this.processRepositoryAsync(config, this.activeProgressToken);
 
       return {
         content: [
@@ -259,7 +261,7 @@ export class LocalRepositoryHandler extends BaseHandler {
         }
 
         const language = detectLanguage(file, content);
-        const fileChunks = this.chunkFileContent(
+        const fileChunks = await this.chunkFileContent(
           content,
           file,
           relativePath,
@@ -316,7 +318,7 @@ export class LocalRepositoryHandler extends BaseHandler {
     return { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata }; // `deletedFilesCount` is handled, not returned directly to async processor yet
   }
 
-  private chunkFileContent(
+  private async chunkFileContent(
     content: string,
     filePath: string, // full absolute path
     relativePath: string,
@@ -324,12 +326,158 @@ export class LocalRepositoryHandler extends BaseHandler {
     language: string,
     chunkStrategy: string,
     fileId: string // Added fileId
-  ): DocumentChunk[] {
+  ): Promise<DocumentChunk[]> {
     const chunks: DocumentChunk[] = [];
     const timestamp = new Date().toISOString();
     const fileUrl = `file://${filePath}`; // URL for the absolute file path
     const title = `${config.name}/${relativePath}`; // Title using repository name and relative path
+    const extension = path.extname(filePath).toLowerCase();
 
+    // Get the current commit SHA
+    const commitSha = await getCurrentCommitSha(config.path);
+
+    // Check if this is a code file that should be parsed with AST
+    const isCodeFile = ['.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cs', '.go', '.rb', '.php'].includes(extension);
+
+    if (isCodeFile && chunkStrategy === 'semantic') {
+      // Parse the code file to extract docstrings and code structure
+      const codeChunks = parseCodeFile(filePath, content);
+
+      // Process each code chunk
+      for (const codeChunk of codeChunks) {
+        // If the chunk has a docstring, create a chunk for it
+        if (codeChunk.docstring) {
+          const docstringText = codeChunk.docstring.trim();
+
+          if (docstringText) {
+            // Create a fully-qualified symbol name
+            const symbolName = codeChunk.parent
+              ? `${codeChunk.parent}.${codeChunk.symbolName}`
+              : codeChunk.symbolName;
+
+            // Prefix the docstring with the symbol name for context
+            const prefixedDocstring = `${symbolName}: ${docstringText}`;
+
+            // Split docstring into smaller chunks if needed (200-400 tokens)
+            const docstringChunks = splitTextByTokens(prefixedDocstring, 200, 400, false);
+
+            // Create a chunk for each docstring part
+            docstringChunks.forEach((text) => {
+              chunks.push({
+                text,
+                url: fileUrl,
+                title,
+                timestamp,
+                filePath: relativePath,
+                language,
+                chunkIndex: chunks.length,
+                totalChunks: -1, // Will be updated later
+                repository: config.name,
+                isRepositoryFile: true,
+                fileId,
+                symbol: symbolName,
+                domain: 'docs' as 'code' | 'docs',
+                lines: [codeChunk.startLine, codeChunk.endLine] as [number, number],
+                commit_sha: commitSha
+              });
+            });
+          }
+        }
+
+        // Only include code chunks if they have an associated docstring
+        // This ensures we focus on documented code
+        if (codeChunk.docstring) {
+          const codeText = codeChunk.text.trim();
+
+          if (codeText) {
+            // Create a fully-qualified symbol name
+            const symbolName = codeChunk.parent
+              ? `${codeChunk.parent}.${codeChunk.symbolName}`
+              : codeChunk.symbolName;
+
+            // Split code into smaller chunks if needed (200-400 tokens)
+            const codeTextChunks = splitTextByTokens(codeText, 200, 400, true);
+
+            // Create a chunk for each code part
+            codeTextChunks.forEach((text) => {
+              chunks.push({
+                text,
+                url: fileUrl,
+                title,
+                timestamp,
+                filePath: relativePath,
+                language,
+                chunkIndex: chunks.length,
+                totalChunks: -1, // Will be updated later
+                repository: config.name,
+                isRepositoryFile: true,
+                fileId,
+                symbol: symbolName,
+                domain: 'code' as 'code' | 'docs',
+                lines: [codeChunk.startLine, codeChunk.endLine] as [number, number],
+                commit_sha: commitSha
+              });
+            });
+          }
+        }
+      }
+
+      // If no chunks were created (no docstrings found), create a single chunk for the module
+      if (chunks.length === 0) {
+        // Look for a module-level docstring
+        const moduleChunk = codeChunks.find(chunk => chunk.symbolName === '__module__' && chunk.docstring);
+
+        if (moduleChunk && moduleChunk.docstring) {
+          // Use the module docstring
+          chunks.push({
+            text: moduleChunk.docstring,
+            url: fileUrl,
+            title,
+            timestamp,
+            filePath: relativePath,
+            language,
+            chunkIndex: 0,
+            totalChunks: 1,
+            repository: config.name,
+            isRepositoryFile: true,
+            fileId,
+            symbol: path.basename(relativePath),
+            domain: 'docs' as 'code' | 'docs',
+            lines: [moduleChunk.startLine, moduleChunk.endLine] as [number, number],
+            commit_sha: commitSha
+          });
+        } else {
+          // Create a minimal chunk with file info
+          chunks.push({
+            text: `File: ${relativePath}`,
+            url: fileUrl,
+            title,
+            timestamp,
+            filePath: relativePath,
+            language,
+            chunkIndex: 0,
+            totalChunks: 1,
+            repository: config.name,
+            isRepositoryFile: true,
+            fileId,
+            symbol: path.basename(relativePath),
+            domain: 'docs' as 'code' | 'docs',
+            lines: [1, 1] as [number, number],
+            commit_sha: commitSha
+          });
+        }
+      } else {
+        // Update totalChunks for all chunks
+        const totalChunks = chunks.length;
+        chunks.forEach(chunk => {
+          chunk.totalChunks = totalChunks;
+        });
+      }
+
+      return chunks;
+    }
+
+    // For non-code files or if not using semantic chunking, use the original approach
     let textChunks: string[] = [];
 
     switch (chunkStrategy) {
@@ -355,6 +503,9 @@ export class LocalRepositoryHandler extends BaseHandler {
       repository: config.name, // Add repository name
       isRepositoryFile: true,  // Mark as repository file
       fileId, // Add fileId to each chunk
+      domain: 'docs' as 'code' | 'docs', // Default to docs for non-code files
+      lines: [0, 0] as [number, number], // We don't have line numbers for these chunks
+      commit_sha: commitSha
     })));
 
     return chunks;
@@ -446,7 +597,14 @@ export class LocalRepositoryHandler extends BaseHandler {
 
     // Save the config file
     const configPath = path.join(REPO_CONFIG_DIR, `${config.name}.json`);
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    info(`[${config.name}] Attempting to save repository config to: ${configPath}`);
+    try {
+      await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      info(`[${config.name}] Successfully saved repository config to: ${configPath}`);
+    } catch (writeErr) {
+      error(`[${config.name}] Error saving repository config to ${configPath}: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`);
+      throw new McpError(ErrorCode.InternalError, `Failed to save repository config: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`);
+    }
   }
 
   private generatePointId(): string {
@@ -456,7 +614,7 @@ export class LocalRepositoryHandler extends BaseHandler {
   /**
    * Process repository asynchronously to avoid MCP timeout
    */
-  private async processRepositoryAsync(config: RepositoryConfig, progressToken?: string | number): Promise<void> {
+  private async processRepositoryAsync(config: RepositoryConfig, _progressToken?: string | number): Promise<void> {
     const repositoryId = config.name;
     try {
       LocalRepositoryHandler.activeIndexingProcesses.set(repositoryId, true);
@@ -520,6 +678,7 @@ export class LocalRepositoryHandler extends BaseHandler {
         });
 
         info(`[${config.name}] Processing batch ${currentBatch} of ${totalBatches}...`);
+        info(`[${config.name}] Generating embeddings for ${batchChunks.length} chunks in batch ${currentBatch}...`);
 
         try {
           const embeddingResults = await Promise.allSettled(

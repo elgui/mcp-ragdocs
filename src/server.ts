@@ -13,10 +13,13 @@ import { RunQueueTool } from "./tools/run-queue.js";
 import { SearchDocumentationTool } from "./tools/search-documentation.js";
 import { info, error } from './utils/logger.js';
 import { LLMService } from "./services/llm.js";
+import { RepositoryConfig } from "./types.js"; // Keep import for type definition
+import fsPromises from 'fs/promises'; // Import promises API
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = join(__dirname, "..");
+const REPO_CONFIG_DIR = join(rootDir, 'repo-configs'); // Define REPO_CONFIG_DIR
 
 interface ApiError extends Error {
   status?: number;
@@ -28,6 +31,9 @@ interface SearchResponse {
     title: string;
     content: string;
     snippet?: string;
+    symbol?: string;
+    type?: string;
+    lines?: string;
   }>;
 }
 
@@ -128,6 +134,7 @@ export class WebInterface {
   }
 
   private setupRoutes() {
+    info('Setting up server routes...');
     const errorHandler = (
       err: ApiError,
       req: Request,
@@ -145,6 +152,8 @@ export class WebInterface {
       res.status(status).json(response);
     };
 
+    info('Defining /documents route...');
+    // Get all available documents
     // Get all available documents
     this.app.get(
       "/documents",
@@ -188,7 +197,68 @@ export class WebInterface {
         }
       }
     );
+    info('/documents route defined.');
 
+    info('Defining /repositories route...');
+    // Get repositories from individual config files
+    this.app.get(
+      "/repositories",
+      async (
+        req: Request,
+        res: Response,
+        next: NextFunction
+      ): Promise<void> => {
+        try {
+          info('Received GET request for /repositories');
+          const repositories: RepositoryConfig[] = [];
+
+          // Ensure the repo-configs directory exists
+          try {
+            await fsPromises.access(REPO_CONFIG_DIR);
+          } catch {
+            info('No repo-configs directory found for /repositories endpoint. Returning empty array.');
+            res.json([]);
+            return;
+          }
+
+          // Get all repository config files
+          const configFiles = await fsPromises.readdir(REPO_CONFIG_DIR);
+          const jsonFiles = configFiles.filter(file => file.endsWith('.json'));
+
+          info(`Found ${jsonFiles.length} repository config files in ${REPO_CONFIG_DIR}`);
+
+          for (const file of jsonFiles) {
+            const configPath = join(REPO_CONFIG_DIR, file);
+            try {
+              const configContent = await fsPromises.readFile(configPath, 'utf-8');
+              const repoConfig = JSON.parse(configContent) as RepositoryConfig;
+              repositories.push({
+                name: repoConfig.name,
+                path: repoConfig.path,
+                include: repoConfig.include, // Include other relevant fields if needed by frontend
+                exclude: repoConfig.exclude,
+                watchMode: repoConfig.watchMode,
+                watchInterval: repoConfig.watchInterval,
+                chunkSize: repoConfig.chunkSize,
+                fileTypeConfig: repoConfig.fileTypeConfig
+              });
+            } catch (err) {
+              error(`Error loading repository config file ${file} for /repositories endpoint: ${err instanceof Error ? err.message : String(err)}. Skipping.`);
+            }
+          }
+
+          info(`Returning ${repositories.length} repositories for /repositories endpoint`);
+          res.json(repositories);
+
+        } catch (error: any) {
+          error(`Error in /repositories endpoint: ${error.message}`);
+          next(error); // Pass other errors to the error handler
+        }
+      }
+    );
+    info('/repositories route defined.');
+
+    info('Defining /queue route...');
     // Get queue status
     this.app.get("/queue", async (req: Request, res: Response) => {
       try {
@@ -251,6 +321,7 @@ export class WebInterface {
         res.json([]);
       }
     });
+    info('/queue route defined.');
 
     // Add document to queue
     this.app.post(
@@ -334,6 +405,9 @@ export class WebInterface {
             .map((block) => {
               const titleMatch = block.match(/\[(.*?)\]\((.*?)\)/);
               const contentMatch = block.match(/Content: (.*?)(?=\n|$)/s);
+              const symbolMatch = block.match(/Symbol: (.*?)(?=\n|$)/);
+              const typeMatch = block.match(/Type: (.*?)(?=\n|$)/);
+              const linesMatch = block.match(/Lines: (.*?)(?=\n|$)/);
 
               return {
                 title: titleMatch ? titleMatch[1] : "Unknown",
@@ -342,6 +416,9 @@ export class WebInterface {
                 snippet: contentMatch
                   ? contentMatch[1].substring(0, 200) + "..."
                   : undefined,
+                symbol: symbolMatch ? symbolMatch[1] : undefined,
+                type: typeMatch ? typeMatch[1] : undefined,
+                lines: linesMatch ? linesMatch[1] : undefined,
               };
             });
 
@@ -536,6 +613,7 @@ export class WebInterface {
     const port = await getAvailablePort(3030);
     this.server = this.app.listen(port, () => {
       info(`Web interface running at http://localhost:${port}`);
+      info(`Server started successfully on port ${port}`);
     });
   }
 

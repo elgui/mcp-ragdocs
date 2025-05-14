@@ -1,13 +1,14 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './base-handler.js';
-import { DocumentChunk, McpToolResponse, RepositoryConfig } from '../types.js';
+import { DocumentChunk, McpToolResponse, RepositoryConfig, FileIndexMetadata } from '../types.js'; // Import FileIndexMetadata
 import fs from 'fs/promises';
 import path from 'path';
 import { glob } from 'glob';
 import crypto from 'crypto';
 import { detectLanguage } from '../utils/language-detection.js';
 import { RepositoryConfigLoader } from '../utils/repository-config-loader.js';
-import { info, error, warn } from '../utils/logger.js';
+import { getFileMetadataManager } from '../utils/file-metadata-manager.js'; // Import getFileMetadataManager
+import { info, error, warn, debug } from '../utils/logger.js'; // Import debug
 
 const COLLECTION_NAME = 'documentation';
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
@@ -71,7 +72,7 @@ export class UpdateRepositoryHandler extends BaseHandler {
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: "Starting to re-process repository files..." });
       }
-      const { chunks, processedFiles, skippedFiles } = await this.processRepository(config);
+      const { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata, deletedFileIds } = await this.processRepository(config); // Destructure deletedFileIds
       info(`[${config.name}] Finished re-processing repository files. Found ${chunks.length} chunks from ${processedFiles} processed files (${skippedFiles} skipped).`);
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-processing files. Found ${chunks.length} chunks.`, percentageComplete: 25 }); // 25% for file processing
@@ -82,21 +83,47 @@ export class UpdateRepositoryHandler extends BaseHandler {
       if (this.activeProgressToken) {
         (this.server as any).sendProgress(this.activeProgressToken, { message: "Removing existing documents...", percentageComplete: 50 }); // 50% after deletion
       }
-      await this.apiClient.qdrantClient.delete(COLLECTION_NAME, {
-        filter: {
-          must: [
-            {
-              key: 'repository',
-              match: { value: repoName }
-            },
-            {
-              key: 'isRepositoryFile',
-              match: { value: true }
-            }
-          ]
-        },
-        wait: true
-      });
+      // Use deletedFileIds to remove specific points
+      if (deletedFileIds.length > 0) {
+        info(`[${config.name}] Removing ${deletedFileIds.length} deleted files from vector database.`);
+        await this.apiClient.qdrantClient.delete(COLLECTION_NAME, {
+          filter: {
+            must: [
+              {
+                key: 'fileId',
+                match: { any: deletedFileIds }
+              }
+            ]
+          },
+          wait: true
+        });
+      } else {
+         // If no files were deleted, still remove existing documents for updated files
+         // This logic might need refinement based on how updates are handled (delete old then add new)
+         // For now, keeping the broad delete for the repository if no specific files were marked as deleted
+         // but files were processed (meaning some were updated).
+         if (processedFiles > 0) {
+            info(`[${config.name}] No files marked as deleted, but ${processedFiles} files were processed. Removing all existing documents for the repository before re-indexing.`);
+             await this.apiClient.qdrantClient.delete(COLLECTION_NAME, {
+                filter: {
+                  must: [
+                    {
+                      key: 'repository',
+                      match: { value: repoName }
+                    },
+                    {
+                      key: 'isRepositoryFile',
+                      match: { value: true }
+                    }
+                  ]
+                },
+                wait: true
+              });
+         } else {
+            info(`[${config.name}] No files processed or deleted. Skipping Qdrant deletion.`);
+         }
+      }
+
 
       // Batch process chunks for better performance
       const batchSize = 100;
@@ -164,6 +191,15 @@ export class UpdateRepositoryHandler extends BaseHandler {
         (this.server as any).sendProgress(this.activeProgressToken, { message: `Finished re-indexing ${indexedChunks} chunks.`, percentageComplete: 100 });
       }
 
+      // Set metadata for processed files after successful upsert
+      const metadataManager = await getFileMetadataManager();
+      for (const metadata of processedFilesMetadata) {
+        await metadataManager.setFileMetadata(metadata);
+        debug(`[${config.name}] Successfully set metadata for file ID: ${metadata.fileId}`);
+      }
+      info(`[${config.name}] Successfully updated metadata for ${processedFilesMetadata.length} files.`);
+
+
       return {
         content: [
           {
@@ -194,12 +230,23 @@ export class UpdateRepositoryHandler extends BaseHandler {
   private async processRepository(config: RepositoryConfig): Promise<{
     chunks: DocumentChunk[],
     processedFiles: number,
-    skippedFiles: number
+    skippedFiles: number,
+    filesNeedingUpdate: number, // For files that changed and need re-indexing
+    processedFilesMetadata: FileIndexMetadata[], // Add processedFilesMetadata to return type
+    deletedFileIds: string[] // Add deletedFileIds to return type
   }> {
+    const metadataManager = await getFileMetadataManager(); // Get metadata manager here
     const chunks: DocumentChunk[] = [];
-    let processedFiles = 0;
-    let skippedFiles = 0;
+    let processedFiles = 0; // Successfully processed and generated chunks for
+    let skippedFiles = 0;   // Skipped due to config, emptiness, or being unchanged
+    let filesNeedingUpdate = 0; // Files that were modified and will be re-indexed
     let fileCounter = 0;
+    const repositoryId = config.name;
+    const processedFilesMetadata: FileIndexMetadata[] = []; // Declare array to store metadata for processed files
+
+    // Load all existing metadata for this repository to compare against current files
+    const existingRepoMetadata = await metadataManager.getRepositoryMetadata(repositoryId);
+    const allKnownFileIdsInRepo = new Set(existingRepoMetadata ? Object.keys(existingRepoMetadata) : []);
 
     // Get all files matching the include/exclude patterns
     const files = await glob(config.include, {
@@ -216,56 +263,123 @@ export class UpdateRepositoryHandler extends BaseHandler {
     }
 
 
+    const currentFileIdsOnDisk = new Set<string>(); // Initialize set here
+
     for (const file of files) {
       fileCounter++;
+      const relativePath = path.relative(config.path, file);
+      const fileId = crypto.createHash('sha256').update(`${repositoryId}:${relativePath}`).digest('hex');
+      currentFileIdsOnDisk.add(fileId); // Keep track of files currently on disk
+
       try {
-        const relativePath = path.relative(config.path, file);
+        const stats = await fs.stat(file);
+        if (!stats.isFile()) {
+          skippedFiles++;
+          continue;
+        }
+        const lastModifiedTimestamp = stats.mtimeMs;
+
         const extension = path.extname(file);
         const fileTypeConfig = config.fileTypeConfig[extension];
 
-        // Skip files that should be excluded based on file type config
         if (fileTypeConfig && fileTypeConfig.include === false) {
+          debug(`[${repositoryId}] Skipping ${relativePath} due to file type exclusion.`);
           skippedFiles++;
           continue;
         }
 
-        // Read file content
         const content = await fs.readFile(file, 'utf-8');
-
-        // Skip empty files
         if (!content.trim()) {
+          debug(`[${repositoryId}] Skipping empty file ${relativePath}.`);
+          skippedFiles++;
+          // If an empty file had metadata, it means it was previously not empty.
+          // Treat as a modified file that is now empty.
+          const existingMetadata = await metadataManager.getFileMetadata(repositoryId, fileId);
+          if (existingMetadata) {
+            info(`[${repositoryId}] File ${relativePath} is now empty. Removing its Qdrant entries and metadata.`);
+            // TODO: Sub-Task 2: Implement deletion of old chunks from Qdrant for fileId
+            // This is where you'd call apiClient.deletePointsByFileId(fileId) or similar
+            error(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${relativePath} (ID: ${fileId}) is now empty. Old Qdrant points should be deleted.`);
+            await metadataManager.removeFileMetadata(repositoryId, fileId);
+            // No new chunks to add, so it's effectively "deleted" from the index.
+          }
+          continue;
+        }
+
+        const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+        const existingMetadata = await metadataManager.getFileMetadata(repositoryId, fileId);
+
+        if (existingMetadata && existingMetadata.contentHash === contentHash && existingMetadata.lastModifiedTimestamp === lastModifiedTimestamp) {
+          debug(`[${repositoryId}] File ${relativePath} is unchanged. Skipping.`);
           skippedFiles++;
           continue;
         }
 
-        // Detect language for better processing
-        const language = detectLanguage(file, content);
+        if (existingMetadata) {
+          info(`[${repositoryId}] File ${relativePath} has changed. Marking for update.`);
+          filesNeedingUpdate++;
+          // TODO: Sub-Task 2: Implement deletion of old chunks from Qdrant for fileId
+          // This is where you'd call apiClient.deletePointsByFileId(fileId) or similar
+          error(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${relativePath} (ID: ${fileId}) was modified. Old Qdrant points should be deleted before re-indexing.`);
+          // Deletion of old Qdrant points will happen before upserting new ones in processRepositoryAsync
+        } else {
+          info(`[${repositoryId}] New file ${relativePath}. Processing.`);
+        }
 
-        // Process the file content into chunks
-        const fileChunks = this.chunkFileContent(
+        const language = detectLanguage(file, content);
+        const fileChunks = this.chunkFileContent( // Note: This calls the chunkFileContent in UpdateRepositoryHandler
           content,
           file,
           relativePath,
           config,
           language,
-          fileTypeConfig?.chunkStrategy || 'line'
+          fileTypeConfig?.chunkStrategy || 'line',
+          fileId // Pass fileId here
         );
 
         chunks.push(...fileChunks);
         processedFiles++;
+
+        // Store metadata for files that generated chunks, to be set after successful Qdrant upsert
+        const newMetadata: FileIndexMetadata = {
+          repositoryId,
+          fileId,
+          filePath: relativePath,
+          lastModifiedTimestamp,
+          contentHash,
+        };
+        processedFilesMetadata.push(newMetadata);
+
+
         if (fileCounter % 50 === 0 && fileCounter > 0 && this.activeProgressToken) {
           const percentageComplete = Math.round((fileCounter / totalFiles) * 25); // File processing is ~1/4 of the job here
           (this.server as any).sendProgress(this.activeProgressToken, { message: `Re-processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
           console.info(`[${config.name}] Re-processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
         }
       } catch (err) {
-        error(`[${config.name}] Error processing file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        skippedFiles++;
+        error(`[${repositoryId}] Error processing file ${relativePath} (File ID: ${fileId}): ${err instanceof Error ? err.message : String(err)}`);
+        skippedFiles++; // Count errors as skipped for now
       }
     }
-    info(`[${config.name}] Completed file re-iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
+    info(`[${repositoryId}] Completed file re-iteration. Processed: ${processedFiles}, Skipped/Errored: ${skippedFiles}.`);
 
-    return { chunks, processedFiles, skippedFiles };
+    // Identify deleted files: files in metadata but not in currentFileIdsOnDisk
+    let deletedFilesCount = 0;
+    const deletedFileIds: string[] = []; // Collect IDs of deleted files
+
+    for (const knownFileId of allKnownFileIdsInRepo) {
+      if (!currentFileIdsOnDisk.has(knownFileId)) {
+        const deletedMetadata = await metadataManager.getFileMetadata(repositoryId, knownFileId);
+        const deletedFilePath = deletedMetadata?.filePath || 'unknown path';
+        info(`[${repositoryId}] File ${deletedFilePath} (ID: ${knownFileId}) deleted from source. Marking for removal from Qdrant and metadata.`);
+        deletedFileIds.push(knownFileId); // Add to list for Qdrant deletion
+        deletedFilesCount++;
+      }
+    }
+    info(`[${repositoryId}] Files deleted from source: ${deletedFilesCount}.`);
+
+
+    return { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata, deletedFileIds }; // Return deletedFileIds
   }
 
   private chunkFileContent(
@@ -274,7 +388,8 @@ export class UpdateRepositoryHandler extends BaseHandler {
     relativePath: string,
     config: RepositoryConfig,
     language: string,
-    chunkStrategy: string
+    chunkStrategy: string,
+    fileId: string // Add fileId parameter
   ): DocumentChunk[] {
     const chunks: DocumentChunk[] = [];
     const timestamp = new Date().toISOString();
@@ -309,6 +424,12 @@ export class UpdateRepositoryHandler extends BaseHandler {
       language,
       chunkIndex: index,
       totalChunks: textChunks.length,
+      fileId, // Include fileId in the chunk
+      repository: config.name, // Add repository name
+      isRepositoryFile: true,  // Mark as repository file
+      domain: 'docs' as 'code' | 'docs', // Default to docs for non-code files
+      lines: [0, 0] as [number, number], // We don't have line numbers for these chunks
+      // commit_sha is not available here, will need to be added in processRepository if needed
     })));
 
     return chunks;

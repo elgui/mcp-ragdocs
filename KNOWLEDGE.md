@@ -72,6 +72,7 @@ A basic web interface is available at `src/public/index.html` and `src/public/ap
 - Managing the processing queue
 - Searching documentation
 - Listing available documents
+- Listing local repositories via the `/repositories` endpoint.
 - **Managing Local Repositories**
 
 ### Claude Desktop Configuration
@@ -125,6 +126,10 @@ Server logs provide valuable debugging information. MCP servers typically redire
 - Logs can reveal tool registration issues.
 - Client connection details are often logged.
 - Request/response patterns can be observed.
+- **HTTP Route Not Reached**: If a client receives a 404 for a seemingly defined HTTP endpoint (e.g., `/repositories`), but server logs do not show the request reaching the corresponding handler, it indicates a routing issue. Debugging steps include:
+    - Verifying the route path matches exactly.
+    - Checking for middleware (like `express.static`) that might intercept the request.
+    - Adding logging within the server's route setup method (`setupRoutes` in `src/server.ts`) to confirm the route definition code is being executed during server startup. If these logs do not appear, it suggests a problem preventing the full execution of the route setup.
 - For long-running tools like `add_repository` and `update_repository`:
   - Detailed progress logs are sent to `stderr` to act as a server-side heartbeat.
   - MCP `$/progress` notifications are sent to the client to prevent request timeouts and provide client-side progress updates.

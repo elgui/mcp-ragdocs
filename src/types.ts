@@ -10,6 +10,10 @@ export interface DocumentChunk {
   repository?: string;
   isRepositoryFile?: boolean;
   fileId?: string; // Unique ID for the file, linking chunks to their source file metadata
+  symbol?: string; // Fully-qualified symbol name (Class.method or filename heading)
+  domain?: 'code' | 'docs'; // Type of content: code or documentation
+  lines?: [number, number]; // Start and end line numbers
+  commit_sha?: string; // Git commit SHA from environment variable
 }
 
 export interface DocumentPayload extends DocumentChunk {

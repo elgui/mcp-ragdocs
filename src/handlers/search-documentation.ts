@@ -14,20 +14,53 @@ export class SearchDocumentationHandler extends BaseHandler {
 
     try {
       const queryEmbedding = await this.apiClient.getEmbeddings(args.query);
-      
+
+      // Prioritize docstrings in search results
       const searchResults = await this.apiClient.qdrantClient.search(COLLECTION_NAME, {
         vector: queryEmbedding,
-        limit,
+        limit: limit * 2, // Get more results initially to filter
         with_payload: true,
         with_vector: false, // Optimize network transfer by not retrieving vectors
         score_threshold: 0.7, // Only return relevant results
       });
 
-      const formattedResults = searchResults.map(result => {
+      // Sort results to prioritize docstrings over code
+      const sortedResults = searchResults
+        .sort((a, b) => {
+          // First sort by domain (docs first)
+          const aDomain = a.payload && 'domain' in a.payload ? a.payload.domain : undefined;
+          const bDomain = b.payload && 'domain' in b.payload ? b.payload.domain : undefined;
+
+          if (aDomain === 'docs' && bDomain !== 'docs') return -1;
+          if (aDomain !== 'docs' && bDomain === 'docs') return 1;
+          // Then by score
+          return b.score - a.score;
+        })
+        .slice(0, limit); // Take only the requested number after sorting
+
+      const formattedResults = sortedResults.map(result => {
         if (!isDocumentPayload(result.payload)) {
           throw new Error('Invalid payload type');
         }
-        return `[${result.payload.title}](${result.payload.url})\nScore: ${result.score.toFixed(3)}\nContent: ${result.payload.text}\n`;
+
+        // Include symbol and domain information in the result
+        let content = `[${result.payload.title}](${result.payload.url})\n`;
+        content += `Score: ${result.score.toFixed(3)}\n`;
+
+        if (result.payload.symbol) {
+          content += `Symbol: ${result.payload.symbol}\n`;
+        }
+
+        if (result.payload.domain) {
+          content += `Type: ${result.payload.domain}\n`;
+        }
+
+        if (result.payload.lines && result.payload.lines[0] !== 0) {
+          content += `Lines: ${result.payload.lines[0]}-${result.payload.lines[1]}\n`;
+        }
+
+        content += `Content: ${result.payload.text}\n`;
+        return content;
       }).join('\n---\n');
 
       return {

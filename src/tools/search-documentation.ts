@@ -28,6 +28,9 @@ interface ProcessedResult {
   sourceInfo?: {
     title: string;
     url: string;
+    symbol?: string;
+    domain?: string;
+    lines?: [number, number];
   };
   content?: string;
   error?: string;
@@ -132,15 +135,29 @@ export class SearchDocumentationTool extends BaseTool {
       // Search for relevant documents
       const searchResults = await this.apiClient.qdrantClient.search(COLLECTION_NAME, {
         vector: queryEmbedding,
-        limit,
+        limit: limit * 2, // Get more results initially to filter
         with_payload: true,
         with_vector: false, // Optimize network transfer by not retrieving vectors
         score_threshold: 0.7, // Only return relevant results
         filter: filter, // Include the filter if it exists
       });
 
+      // Sort results to prioritize docstrings over code
+      const sortedResults = searchResults
+        .sort((a, b) => {
+          // First sort by domain (docs first)
+          const aDomain = a.payload && 'domain' in a.payload ? a.payload.domain : undefined;
+          const bDomain = b.payload && 'domain' in b.payload ? b.payload.domain : undefined;
+
+          if (aDomain === 'docs' && bDomain !== 'docs') return -1;
+          if (aDomain !== 'docs' && bDomain === 'docs') return 1;
+          // Then by score
+          return b.score - a.score;
+        })
+        .slice(0, limit); // Take only the requested number after sorting
+
       // If no results found, return early
-      if (searchResults.length === 0) {
+      if (sortedResults.length === 0) {
         return {
           content: [
             {
@@ -155,7 +172,7 @@ export class SearchDocumentationTool extends BaseTool {
 
       // If not using the LLM chain, return simple results
       if (!useChain) {
-        const formattedResults = searchResults.map(result => {
+        const formattedResults = sortedResults.map(result => {
           if (!isDocumentPayload(result.payload)) {
             throw new Error('Invalid payload type');
           }
@@ -164,6 +181,9 @@ export class SearchDocumentationTool extends BaseTool {
             url: result.payload.url,
             score: result.score,
             content: result.payload.text,
+            symbol: result.payload.symbol,
+            domain: result.payload.domain,
+            lines: result.payload.lines,
           };
         });
 
@@ -173,7 +193,14 @@ export class SearchDocumentationTool extends BaseTool {
               type: 'text',
               text: returnFormat === 'json'
                 ? JSON.stringify({ results: formattedResults })
-                : formattedResults.map(r => `[${r.title}](${r.url})\nScore: ${r.score.toFixed(3)}\nContent: ${r.content}\n`).join('\n---\n'),
+                : formattedResults.map(r => {
+                  let text = `[${r.title}](${r.url})\nScore: ${r.score.toFixed(3)}\n`;
+                  if (r.symbol) text += `Symbol: ${r.symbol}\n`;
+                  if (r.domain) text += `Type: ${r.domain}\n`;
+                  if (r.lines && r.lines[0] !== 0) text += `Lines: ${r.lines[0]}-${r.lines[1]}\n`;
+                  text += `Content: ${r.content}\n`;
+                  return text;
+                }).join('\n---\n'),
             },
           ],
         };
@@ -184,7 +211,7 @@ export class SearchDocumentationTool extends BaseTool {
 
       // Check relevance of each document
       const relevanceResults = await Promise.all(
-        searchResults.map(async (result) => {
+        sortedResults.map(async (result) => {
           if (!isDocumentPayload(result.payload)) {
             throw new Error('Invalid payload type');
           }
@@ -268,7 +295,7 @@ export class SearchDocumentationTool extends BaseTool {
               text: JSON.stringify({
                 query: args.query,
                 files: fileDescriptions,
-                totalResults: searchResults.length,
+                totalResults: sortedResults.length,
                 relevantResults: relevantResults.length
               }, null, 2)
             },
@@ -320,7 +347,12 @@ export class SearchDocumentationTool extends BaseTool {
                   summary: synthesis.summary,
                   relevantPoints: synthesis.relevantPoints
                 },
-                sourceInfo: synthesis.sourceInfo
+                sourceInfo: {
+                  ...synthesis.sourceInfo,
+                  symbol: payload.symbol,
+                  domain: payload.domain,
+                  lines: payload.lines
+                }
               } as ProcessedResult;
             } catch (err) {
               console.error('Error synthesizing content:', err);
@@ -368,7 +400,7 @@ export class SearchDocumentationTool extends BaseTool {
               text: JSON.stringify({
                 query: args.query,
                 results: processedResults,
-                totalResults: searchResults.length,
+                totalResults: sortedResults.length,
                 relevantResults: relevantResults.length
               }, null, 2)
             },
@@ -378,6 +410,19 @@ export class SearchDocumentationTool extends BaseTool {
         // Format as text
         const textResults = processedResults.map((result: ProcessedResult) => {
           let text = `[${result.title}](${result.url})\nScore: ${result.score.toFixed(3)}\n`;
+
+          // Add symbol and domain information if available
+          if (result.sourceInfo?.symbol) {
+            text += `Symbol: ${result.sourceInfo.symbol}\n`;
+          }
+
+          if (result.sourceInfo?.domain) {
+            text += `Type: ${result.sourceInfo.domain}\n`;
+          }
+
+          if (result.sourceInfo?.lines && result.sourceInfo.lines[0] !== 0) {
+            text += `Lines: ${result.sourceInfo.lines[0]}-${result.sourceInfo.lines[1]}\n`;
+          }
 
           if (result.synthesis) {
             text += `Summary: ${result.synthesis.summary}\n\nRelevant Points:\n`;

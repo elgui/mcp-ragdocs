@@ -4,6 +4,20 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Launch Program (build)",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/build/index.js",
+            "outFiles": [
+                "${workspaceFolder}/build/**/*.js"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "preLaunchTask": "npm run build"
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch Program",
             "skipFiles": [
                 "<node_internals>/**"
@@ -12,7 +26,7 @@
             "outFiles": [
                 "${workspaceFolder}/build/**/*.js"
             ],
-            "envFile": "${workspaceFolder}/.env"
+            "envFile": "${workspaceFolder}/.env",
         },
         {
             "type": "chrome",

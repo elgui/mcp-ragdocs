@@ -1,3 +1,5 @@
+**Disclaimer:** This project is actively being developed, and contributions are welcome! Feel free to jump in, clean things up, and participate in making it even better.
+
 # RAG Documentation MCP Server
 [![smithery badge](https://smithery.ai/badge/@rahulretnan/mcp-ragdocs)](https://smithery.ai/server/@rahulretnan/mcp-ragdocs)
 
@@ -20,7 +22,6 @@ An MCP server implementation that provides tools for retrieving and processing d
 ### Tools
 
 1. **search_documentation**
-
    - Search through the documentation using vector search
    - Returns relevant chunks of documentation with source information
    - Enhanced with LLM processing to confirm relevance and synthesize content
@@ -31,32 +32,26 @@ An MCP server implementation that provides tools for retrieving and processing d
      - `returnFormat`: Format to return results in ('json' or 'text', default: 'json')
 
 2. **list_sources**
-
    - List all available documentation sources
    - Provides metadata about each source
 
 3. **extract_urls**
-
    - Extract URLs from text and check if they're already in the documentation
    - Useful for preventing duplicate documentation
 
 4. **remove_documentation**
-
    - Remove documentation from a specific source
    - Cleans up outdated or irrelevant documentation
 
 5. **list_queue**
-
    - List all items in the processing queue
    - Shows status of pending documentation processing
 
 6. **run_queue**
-
    - Process all items in the queue
    - Automatically adds new documentation to the vector store
 
 7. **clear_queue**
-
    - Clear all items from the processing queue
    - Useful for resetting the system
 
@@ -82,7 +77,7 @@ An MCP server implementation that provides tools for retrieving and processing d
 11. **update_repository**
     - Re-index a repository with updated configuration
     - Can modify include/exclude patterns and other settings
-    - Provides detailed progress logging (heartbeat) to `stderr` during re-indexing
+    - Provides detailed progress logging (heartbeat) to `stderr) during re-indexing
     - Required parameter: `name` (repository name)
 
 12. **remove_repository**
@@ -101,9 +96,17 @@ An MCP server implementation that provides tools for retrieving and processing d
     - Shows progress percentage, file counts, and timing information
     - Optional parameter: `name` (repository name) - if not provided, returns status for all repositories
 
+
 ## Quick Start
 
-The RAG Documentation tool is designed for:
+   - Search through the documentation using vector search
+   - Returns relevant chunks of documentation with source information
+   - Enhanced with LLM processing to confirm relevance and synthesize content
+   - Supports JSON or text output formats
+   - Optional parameters:
+     - `useChain`: Whether to use LLM chain for processing (default: true)
+     - `synthesizeFullContent`: Whether to read and synthesize full document content (default: true)
+     - `returnFormat`: Format to return results in ('json' or 'text', default: 'json')
 
 - Enhancing AI responses with relevant documentation
 - Building documentation-aware AI assistants
@@ -370,58 +373,45 @@ Chunks: 1500 indexed (of 3300)
 Batch: 15 of 33
 ```
 
-### Repository Configuration File
+### Repository Configuration
 
-The system supports a `repositories.json` configuration file that allows you to define repositories to be automatically indexed at startup:
+Repository configurations are stored as individual JSON files in the `repo-configs` directory at the project root. These files are automatically created and managed when you use the repository management tools (add, update, remove).
+
+Each repository configuration file (`repo-configs/<repository-name>.json`) contains the settings for a specific repository:
 
 ```json
 {
-  "repositories": [
-    {
-      "path": "/path/to/your/repo",
-```
+  "path": "/path/to/your/repo",
 
-The configuration file is automatically updated when repositories are added, updated, or removed using the repository management tools. You can also manually edit the file to configure repositories before starting the server. The paths within the configuration file, such as the `path` for each repository and the implicit location of `repositories.json` itself, are resolved relative to the project root directory where the server is executed.
-
-**Configuration Options:**
-
-- `repositories`: Array of repository configurations
-  - `path`: Absolute path to the repository directory
-      "name": "my-project",
-      "include": ["**/*.js", "**/*.ts", "**/*.md"],
-      "exclude": ["**/node_modules/**", "**/.git/**"],
-      "watchMode": true,
-      "watchInterval": 60000,
-      "chunkSize": 1000,
-      "fileTypeConfig": {
-        ".js": { "include": true, "chunkStrategy": "semantic" },
-        ".ts": { "include": true, "chunkStrategy": "semantic" },
-        ".md": { "include": true, "chunkStrategy": "semantic" }
-      }
-    }
-  ],
-  "autoWatch": true
+  "name": "my-project",
+  "include": ["**/*.js", "**/*.ts", "**/*.md"],
+  "exclude": ["**/node_modules/**", "**/.git/**"],
+  "watchMode": true,
+  "watchInterval": 60000,
+  "chunkSize": 1000,
+  "fileTypeConfig": {
+    ".js": { "include": true, "chunkStrategy": "semantic" },
+    ".ts": { "include": true, "chunkStrategy": "semantic" },
+    ".md": { "include": true, "chunkStrategy": "semantic" }
+  }
 }
 ```
 
-The configuration file is automatically updated when repositories are added, updated, or removed using the repository management tools. You can also manually edit the file to configure repositories before starting the server.
+The `autoWatch` setting is now managed within each individual repository configuration file. If `watchMode` is set to `true` in a repository's config file, the server will automatically start watching that repository at startup.
 
 **Configuration Options:**
 
-- `repositories`: Array of repository configurations
-  - `path`: Absolute path to the repository directory
-  - `name`: Unique name for the repository
-  - `include`: Array of glob patterns to include
-  - `exclude`: Array of glob patterns to exclude
-  - `watchMode`: Whether to watch for changes
-  - `watchInterval`: Polling interval in milliseconds
-  - `chunkSize`: Default chunk size for files
-  - `fileTypeConfig`: Configuration for specific file types
-    - `include`: Whether to include this file type
-    - `chunkStrategy`: Chunking strategy ("semantic", "line", or "character")
-    - `chunkSize`: Optional override for chunk size
-
-- `autoWatch`: Whether to automatically start watching repositories with `watchMode: true` at startup
+- `path`: Absolute path to the repository directory
+- `name`: Unique name for the repository
+- `include`: Array of glob patterns to include
+- `exclude`: Array of glob patterns to exclude
+- `watchMode`: Whether to watch for changes (automatically starts watching at startup if true)
+- `watchInterval`: Polling interval in milliseconds
+- `chunkSize`: Default chunk size for files
+- `fileTypeConfig`: Configuration for specific file types
+  - `include`: Whether to include this file type
+  - `chunkStrategy`: Chunking strategy ("semantic", "line", or "character")
+  - `chunkSize`: Optional override for chunk size
 
 ## Acknowledgments
 

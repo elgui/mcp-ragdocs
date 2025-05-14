@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { RepositoryConfig } from '../types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ApiClient } from '../api-client.js';
@@ -9,20 +8,10 @@ import { LocalRepositoryHandler } from '../handlers/local-repository.js';
 import { WatchRepositoryHandler } from '../handlers/watch-repository.js';
 import { info, error } from './logger.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_FILE_PATH = path.join(__dirname, '..', '..', 'repositories.json');
-const REPO_CONFIG_DIR = path.join(__dirname, '..', '..', 'repo-configs');
+const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 
 /**
- * Interface for the repositories configuration file
- */
-interface RepositoriesConfig {
-  repositories: RepositoryConfig[];
-  autoWatch: boolean;
-}
-
-/**
- * Class for loading and managing repository configurations from a JSON file
+ * Class for loading and managing repository configurations from individual files in repo-configs
  */
 export class RepositoryConfigLoader {
   private server: Server;
@@ -34,111 +23,93 @@ export class RepositoryConfigLoader {
   constructor(server: Server, apiClient: ApiClient) {
     this.server = server;
     this.apiClient = apiClient;
+    // Initialize handlers with server and apiClient
     this.updateHandler = new UpdateRepositoryHandler(server, apiClient);
     this.addHandler = new LocalRepositoryHandler(server, apiClient);
     this.watchHandler = new WatchRepositoryHandler(server, apiClient);
   }
 
   /**
-   * Load repositories from the configuration file and initialize them
+   * Load repositories from individual configuration files in repo-configs and initialize them
    */
   async loadRepositories(): Promise<void> {
     try {
-      // Check if the config file exists
+      // Ensure the repo-configs directory exists
       try {
-        await fs.access(CONFIG_FILE_PATH);
+        await fs.access(REPO_CONFIG_DIR);
       } catch {
-        info('No repositories.json configuration file found. Creating default configuration...');
-        await this.createDefaultConfig();
+        info('No repo-configs directory found. No repositories to load at startup.');
         return;
       }
 
-      // Read the config file
-      const configContent = await fs.readFile(CONFIG_FILE_PATH, 'utf-8');
-      const config = JSON.parse(configContent) as RepositoriesConfig;
+      // Get all repository config files
+      const configFiles = await fs.readdir(REPO_CONFIG_DIR);
+      const jsonFiles = configFiles.filter(file => file.endsWith('.json'));
 
-      // Ensure the repo-configs directory exists
-      await fs.mkdir(REPO_CONFIG_DIR, { recursive: true });
+      if (jsonFiles.length === 0) {
+        info('No repository configuration files found in repo-configs.');
+        return;
+      }
 
-      // Process each repository in the config
-      info(`Loading ${config.repositories.length} repositories from configuration...`);
+      info(`Loading ${jsonFiles.length} repositories from repo-configs...`);
 
-      for (const repoConfig of config.repositories) {
+      for (const file of jsonFiles) {
+        const configPath = path.join(REPO_CONFIG_DIR, file);
         try {
+          const configContent = await fs.readFile(configPath, 'utf-8');
+          const repoConfig = JSON.parse(configContent) as RepositoryConfig;
+
           // Check if the repository path exists
           try {
             const stats = await fs.stat(repoConfig.path);
             if (!stats.isDirectory()) {
-              error(`Repository path is not a directory: ${repoConfig.path}`);
+              error(`Repository path is not a directory: ${repoConfig.path}. Skipping.`);
               continue;
             }
           } catch (err) {
-            error(`Repository path does not exist: ${repoConfig.path}. Error: ${err instanceof Error ? err.message : String(err)}`);
+            error(`Repository path does not exist: ${repoConfig.path}. Error: ${err instanceof Error ? err.message : String(err)}. Skipping.`);
             continue;
           }
 
-          // Check if the repository is already indexed
-          const configPath = path.join(REPO_CONFIG_DIR, `${repoConfig.name}.json`);
-          let isUpdate = false;
-
-          try {
-            await fs.access(configPath);
-            isUpdate = true;
-          } catch {
-            // Repository doesn't exist yet, will be added
-          }
-
-          if (isUpdate) {
-            // Update existing repository
-            info(`Updating repository: ${repoConfig.name}`);
-            await this.updateHandler.handle(repoConfig);
-          } else {
-            // Add new repository
-            info(`Adding repository: ${repoConfig.name}`);
-            await this.addHandler.handle(repoConfig);
-          }
+          // For startup loading, we treat all found configs as needing an update/re-index
+          // This ensures consistency with the current state of the files on disk
+          info(`Initializing repository: ${repoConfig.name}`);
+          await this.updateHandler.handle(repoConfig); // Use updateHandler for initial load
 
           // Start watching if configured
-          if (config.autoWatch && repoConfig.watchMode) {
+          if (repoConfig.watchMode) {
             info(`Starting watch for repository: ${repoConfig.name}`);
+            // Pass undefined for callContext as this is a server-initiated watch
             await this.watchHandler.handle({
               name: repoConfig.name,
               action: 'start'
-            });
+            }, undefined);
           }
         } catch (err) {
-          error(`Error processing repository ${repoConfig.name}: ${err instanceof Error ? err.message : String(err)}`);
+          error(`Error processing repository config file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
-      info('Repositories loaded successfully from configuration');
+      info('Repositories loaded and initialized successfully from repo-configs');
     } catch (err) {
-      error(`Error loading repositories from configuration: ${err instanceof Error ? err.message : String(err)}`);
+      error(`Error loading repositories from repo-configs: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   /**
-   * Create a default configuration file if none exists
-   */
-  private async createDefaultConfig(): Promise<void> {
-    const defaultConfig: RepositoriesConfig = {
-      repositories: [],
-      autoWatch: true
-    };
-
-    try {
-      await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-      info(`Created default repositories configuration at ${CONFIG_FILE_PATH}`);
-    } catch (err) {
-      error(`Error creating default configuration: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  /**
-   * Update the configuration file with the current state of repositories
+   * This method is no longer used for loading at startup, but is kept for tool-based updates.
+   * It updates the configuration file with the current state of repositories.
+   * Note: This method's purpose might need re-evaluation if repositories.json is truly obsolete.
+   * Keeping it for now based on existing tool usage.
    */
   async updateConfigFile(): Promise<void> {
-    try {
+     // This method's logic might need adjustment if repositories.json is removed entirely.
+     // For now, it can potentially be used by tools that still interact with a list concept.
+     // If repositories.json is completely removed, this method would become obsolete.
+     info('updateConfigFile called. This method might be obsolete if repositories.json is removed.');
+     // Current implementation reads from repo-configs and writes to repositories.json
+     // This might still be needed for the /repositories endpoint in src/server.ts
+     try {
       // Get all repository config files
       const configFiles = await fs.readdir(REPO_CONFIG_DIR);
       const jsonFiles = configFiles.filter(file => file.endsWith('.json'));
@@ -156,91 +127,81 @@ export class RepositoryConfigLoader {
         }
       }
 
-      // Check if the config file exists
-      let existingConfig: RepositoriesConfig = { repositories: [], autoWatch: true };
+      // Check if the repositories.json file exists to preserve autoWatch setting
+      let existingConfig: { autoWatch?: boolean } = {};
+      const CONFIG_FILE_PATH = path.join(process.cwd(), 'repositories.json'); // Use process.cwd() for consistency
       try {
         const configContent = await fs.readFile(CONFIG_FILE_PATH, 'utf-8');
-        existingConfig = JSON.parse(configContent) as RepositoriesConfig;
+        existingConfig = JSON.parse(configContent);
       } catch {
-        // Config file doesn't exist yet, will use default
+        // repositories.json doesn't exist, use default autoWatch
       }
 
-      // Update the config file
-      const updatedConfig: RepositoriesConfig = {
+      // Update the repositories.json file
+      const updatedConfig = {
         repositories,
-        autoWatch: existingConfig.autoWatch
+        autoWatch: existingConfig.autoWatch !== undefined ? existingConfig.autoWatch : true // Preserve existing or default to true
       };
 
       await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(updatedConfig, null, 2), 'utf-8');
       info(`Updated repositories configuration at ${CONFIG_FILE_PATH}`);
     } catch (err) {
-      error(`Error updating configuration file: ${err instanceof Error ? err.message : String(err)}`);
+      error(`Error updating repositories.json configuration file: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   /**
-   * Add a repository to the configuration file
+   * Add a repository to the configuration file (repo-configs)
+   * This method is used by the add_repository tool.
    */
   async addRepositoryToConfig(config: RepositoryConfig): Promise<void> {
+    // This method now only saves the individual config file in repo-configs.
+    // The repositories.json file is updated by updateConfigFile if needed (e.g., for the /repositories endpoint).
+    info(`Saving individual repository config for ${config.name} to repo-configs...`);
     try {
-      // Check if the config file exists
-      let existingConfig: RepositoriesConfig = { repositories: [], autoWatch: true };
-      try {
-        const configContent = await fs.readFile(CONFIG_FILE_PATH, 'utf-8');
-        existingConfig = JSON.parse(configContent) as RepositoriesConfig;
-      } catch {
-        // Config file doesn't exist yet, will use default
-      }
+      // Ensure the config directory exists
+      await fs.mkdir(REPO_CONFIG_DIR, { recursive: true });
 
-      // Check if the repository already exists
-      const existingIndex = existingConfig.repositories.findIndex(repo => repo.name === config.name);
-      if (existingIndex >= 0) {
-        // Update existing repository
-        existingConfig.repositories[existingIndex] = config;
-      } else {
-        // Add new repository
-        existingConfig.repositories.push(config);
-      }
+      // Save the config file
+      const configPath = path.join(REPO_CONFIG_DIR, `${config.name}.json`);
+      await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      info(`Saved individual repository config for ${config.name} to ${configPath}`);
 
-      // Update the config file
-      await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(existingConfig, null, 2), 'utf-8');
-      info(`Added repository ${config.name} to configuration`);
+      // Optionally, update the main repositories.json file if it's still used by the frontend
+      // This call might be removed if the frontend is updated to read from a different endpoint
+      // or if repositories.json is completely removed.
+      await this.updateConfigFile();
+
     } catch (err) {
-      error(`Error adding repository ${config.name} to configuration: ${err instanceof Error ? err.message : String(err)}`);
+      error(`Error adding repository ${config.name} to repo-configs: ${err instanceof Error ? err.message : String(err)}`);
+      throw err; // Re-throw to be handled by the calling handler
     }
   }
 
   /**
-   * Remove a repository from the configuration file
+   * Remove a repository from the configuration file (repo-configs)
+   * This method is used by the remove_repository tool.
    */
   async removeRepositoryFromConfig(name: string): Promise<void> {
+    info(`Removing individual repository config for ${name} from repo-configs...`);
+    const configPath = path.join(REPO_CONFIG_DIR, `${name}.json`);
     try {
-      // Check if the config file exists
-      try {
-        await fs.access(CONFIG_FILE_PATH);
-      } catch {
-        info('No repositories.json configuration file found.');
-        return;
-      }
+      // Remove the repository config file
+      await fs.unlink(configPath);
+      info(`Removed individual repository config for ${name} from ${configPath}`);
 
-      // Read the config file
-      const configContent = await fs.readFile(CONFIG_FILE_PATH, 'utf-8');
-      const config = JSON.parse(configContent) as RepositoriesConfig;
+      // Optionally, update the main repositories.json file if it's still used by the frontend
+      // This call might be removed if the frontend is updated to read from a different endpoint
+      // or if repositories.json is completely removed.
+      await this.updateConfigFile();
 
-      // Remove the repository
-      const initialLength = config.repositories.length;
-      config.repositories = config.repositories.filter(repo => repo.name !== name);
-
-      if (config.repositories.length === initialLength) {
-        info(`Repository ${name} not found in configuration`);
-        return;
-      }
-
-      // Update the config file
-      await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf-8');
-      info(`Removed repository ${name} from configuration`);
     } catch (err) {
-      error(`Error removing repository ${name} from configuration: ${err instanceof Error ? err.message : String(err)}`);
+      if ((err as any).code === 'ENOENT') {
+        info(`Repository config file for ${name} not found in repo-configs. Nothing to remove.`);
+      } else {
+        error(`Error removing repository ${name} from repo-configs: ${err instanceof Error ? err.message : String(err)}`);
+        throw err; // Re-throw to be handled by the calling handler
+      }
     }
   }
 }

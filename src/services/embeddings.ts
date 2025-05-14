@@ -20,12 +20,12 @@ export class OllamaProvider implements EmbeddingProvider {
     try {
       // Explicitly re-encode to UTF-8 to potentially handle subtle encoding issues
       const utf8Text = Buffer.from(text, 'utf-8').toString('utf-8');
-      error('Generating Ollama embeddings for text: ' + utf8Text.substring(0, 50) + '...');
+      info('Generating Ollama embeddings for text: ' + utf8Text.substring(0, 50) + '...');
       const response = await ollama.embeddings({
         model: this.model,
         prompt: utf8Text
       });
-      error('Successfully generated Ollama embeddings with size: ' + response.embedding.length);
+      info('Successfully generated Ollama embeddings with size: ' + response.embedding.length);
       return response.embedding;
     } catch (err) {
       error('Ollama embedding error: ' + err);
@@ -74,13 +74,13 @@ export class OpenAIProvider implements EmbeddingProvider {
     try {
       // Explicitly re-encode to UTF-8 to potentially handle subtle encoding issues
       const utf8Text = Buffer.from(text, 'utf-8').toString('utf-8');
-      error('Generating OpenAI embeddings for text: ' + utf8Text.substring(0, 50) + '...');
+      info('Generating OpenAI embeddings for text: ' + utf8Text.substring(0, 50) + '...');
       const response = await this.client.embeddings.create({
         model: this.model,
         input: utf8Text,
       });
       const embedding = response.data[0].embedding;
-      error('Successfully generated OpenAI embeddings with size: ' + embedding.length);
+      info('Successfully generated OpenAI embeddings with size: ' + embedding.length);
       return embedding;
     } catch (err) {
       error('OpenAI embedding error: ' + err);

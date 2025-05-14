@@ -664,7 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
             displayRepositories(repositories);
         } catch (error) {
             console.error('Error fetching repositories:', error);
-            repositoriesList.innerHTML = '<div class="p-8 text-center text-red-500"><i class="fas fa-exclamation-circle mr-2"></i>Failed to load repositories</div>';
+            repositoriesList.innerHTML = `<div class="p-8 text-center text-red-500"><i class="fas fa-exclamation-circle mr-2"></i>Failed to load repositories: ${error.message}</div>`;
         }
     }
     
