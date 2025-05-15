@@ -30,6 +30,25 @@ The system uses a handler registry pattern to manage tools. The key components a
    } as ToolDefinition
    ```
 
+## Migrated Tools
+
+The following tools have been migrated to the new architecture:
+
+1.  **SearchDocumentationEnhancedTool** (`src/tools/search-documentation-enhanced.ts`)
+2.  **ExtractUrlsEnhancedTool** (`src/tools/extract-urls-enhanced.ts`)
+3.  **ListSourcesEnhancedTool** (`src/tools/list-sources-enhanced.ts`)
+4.  **ClearQueueEnhancedTool** (`src/tools/clear-queue-enhanced.ts`)
+5.  **RunQueueEnhancedTool** (`src/tools/run-queue-enhanced.ts`)
+6.  **RemoveDocumentationEnhancedTool** (`src/tools/remove-documentation-enhanced.ts`)
+7.  **ListQueueEnhancedTool** (`src/tools/list-queue-enhanced.ts`)
+8.  **AddDocumentationEnhancedTool** (`src/tools/add-documentation-enhanced.ts`)
+9.  **LocalRepositoryEnhancedTool** (`src/tools/local-repository-enhanced.ts`)
+10. **ListRepositoriesEnhancedTool** (`src/tools/list-repositories-enhanced.ts`)
+11. **RemoveRepositoryEnhancedTool** (`src/tools/remove-repository-enhanced.ts`)
+12. **UpdateRepositoryEnhancedTool** (`src/tools/update-repository-enhanced.ts`)
+13. **WatchRepositoryEnhancedTool** (`src/tools/watch-repository-enhanced.ts`)
+14. **GetIndexingStatusEnhancedTool** (`src/tools/get-indexing-status-enhanced.ts`)
+
 ## Tools
 
 ### Documentation Management Tools
@@ -49,25 +68,35 @@ The system uses a handler registry pattern to manage tools. The key components a
 
 ### Local Repository Management Tools
 
-1. **watch_repository**:
-   - Adds a local repository to be watched and indexed.
-   - Required parameter: `path`
+1. **local_repository**:
+   - Adds a local repository to the documentation index.
+   - Scans files, generates embeddings, and stores them in the Qdrant vector database.
+   - Supports `watchMode` to automatically re-index on file changes.
+   - Manages persistent indexing state to avoid re-indexing unchanged files.
+   - Required parameter: `path`. Optional: `name`, `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`.
 
-2. **list_repositories**:
-   - Lists all currently watched local repositories.
+2. **watch_repository** (Enhanced):
+   - Starts or stops watching a configured local repository for changes.
+   - When changes are detected, it triggers an update of the repository's index using the `update_repository` tool.
+   - Required parameters: `name`, `action` ('start' or 'stop').
 
-3. **remove_repository**:
-   - Removes a local repository from the watch list and its indexed documentation.
-   - Required parameter: `path`
+3. **list_repositories** (Enhanced):
+   - Lists all configured documentation repositories. This tool has been migrated to the enhanced architecture (`src/tools/list-repositories-enhanced.ts`).
 
-4. **update_repository**:
-   - Triggers an update/re-indexing of a specific local repository.
-   - Required parameter: `path`
+4. **remove_repository**:
+   - Removes a configured documentation repository and its indexed documents.
+   - This tool has been migrated to the enhanced architecture (`src/tools/remove-repository-enhanced.ts`).
+   - Required parameter: `name`
+
+5. **update_repository**:
+   - Updates an existing documentation repository configuration and re-indexes its content.
+   - This tool has been migrated to the enhanced architecture (`src/tools/update-repository-enhanced.ts`).
+   - Required parameter: `name`. Optional: `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`.
 
 ## Client Integration
 
 ### Web Interface
-A basic web interface is available at `src/public/index.html` and `src/public/app.js` for interacting with the MCP server. It provides functionality for:
+An enhanced web interface is available at `src/public/index.html` and `src/public/app.js` for interacting with the MCP server. This interface (`src/server-enhanced.ts`) has been updated to directly use the enhanced tools from the consolidated architecture. It provides functionality for:
 - Adding documentation via URL
 - Managing the processing queue
 - Searching documentation
@@ -188,8 +217,8 @@ Remember to replace `"your-mistral-api-key-here"` with your actual Mistral API k
 - **Current Status (Sub-Task 1 Implementation):**
     - **`FileIndexMetadata` Interface**: Defined in `src/types.ts` to structure metadata (includes `filePath`, `fileId`, `repositoryId`, `lastModifiedTimestamp`, `contentHash`).
     - **`FileMetadataManager`**: Implemented in `src/utils/file-metadata-manager.ts`. Manages loading from and saving to `metadata/index_metadata.json`. Provides methods to get, set, and remove metadata. Initializes by creating the metadata file if it doesn't exist.
-    - **Core Indexing Logic Modified (`src/handlers/local-repository.ts`)**:
-        - **Integration**: `FileMetadataManager` is now used within `processRepository`.
+    - **Core Indexing Logic Modified (now in `src/tools/local-repository-enhanced.ts`)**:
+        - **Integration**: `FileMetadataManager` is used within the `processRepository` method of `LocalRepositoryEnhancedTool`.
         - **File Hashing & Timestamps**: For each file, its content hash (`crypto.createHash('sha256')`) and last modified timestamp (`fs.stat().mtimeMs`) are obtained.
         - **`fileId` Generation**: A unique `fileId` (hash of `repositoryId:relativePath`) is generated for each file.
         - **Metadata Comparison**:
@@ -230,3 +259,57 @@ Remember to replace `"your-mistral-api-key-here"` with your actual Mistral API k
         - **Implemented (Foundation)**: The system loads metadata on startup via `FileMetadataManager.initialize()`.
         - **Implemented (Foundation)**: The indexing process correctly uses this loaded metadata to avoid re-indexing unchanged files.
         - **Pending**: Full handling of files deleted while the server was offline.
+</file_content>
+
+IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
+
+<environment_details>
+# VSCode Visible Files
+KNOWLEDGE.md
+
+# VSCode Open Tabs
+c:/Users/Gui/Documents/Cline/Rules/docrag_rules.md
+src/services/embeddings.ts
+src/handlers/search-documentation.ts
+src/handlers/base-handler.ts
+src/server.ts
+src/tools/run-queue-enhanced.ts
+src/tools/remove-documentation-enhanced.ts
+src/tools/list-queue-enhanced.ts
+src/tools/add-documentation-enhanced.ts
+src/tools/local-repository-enhanced.ts
+ARCHITECTURE.md
+repo-configs/mcp-filesystem.json
+c:/Users/Gui/AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
+.vscode/launch.json
+.env
+src/utils/file-metadata-manager.ts
+src/handlers/local-repository.ts
+src/handlers/update-repository.ts
+repo-configs/filesystem_mcp.json
+src/public/app.js
+src/types.ts
+.vscode/tasks.json
+.gitignore
+package.json
+.clinerules/mcp-ragdocs_clinerules.md
+src/tools/list-repositories-enhanced.ts
+src/tools/remove-repository-enhanced.ts
+src/tools/update-repository-enhanced.ts
+src/tools/enhanced-tools.ts
+src/handler-registry-enhanced.ts
+src/index-enhanced.ts
+TASK.md
+KNOWLEDGE.md
+README.md
+tsconfig.json
+
+# Current Time
+5/14/2025, 7:27:05 PM (Asia/Beirut, UTC+3:00)
+
+# Context Window Usage
+114,355 / 1,048.576K tokens used (11%)
+
+# Current Mode
+ACT MODE
+</environment_details>

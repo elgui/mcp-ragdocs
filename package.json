@@ -17,7 +17,9 @@
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "start": "node build/index.js"
+    "start": "node build/index.js",
+    "start:enhanced": "tsc && node build/index-enhanced.js",
+    "test": "jest"
   },
   "keywords": [
     "mcp",
@@ -63,7 +65,11 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.17.46",
+    "@types/supertest": "^6.0.3",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },

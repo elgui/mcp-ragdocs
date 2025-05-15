@@ -3,9 +3,8 @@ import path from 'path';
 import { RepositoryConfig } from '../types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ApiClient } from '../api-client.js';
-import { UpdateRepositoryHandler } from '../handlers/update-repository.js';
-import { LocalRepositoryHandler } from '../handlers/local-repository.js';
-import { WatchRepositoryHandler } from '../handlers/watch-repository.js';
+import { UpdateRepositoryEnhancedTool } from '../tools/update-repository-enhanced.js';
+import { WatchRepositoryEnhancedTool } from '../tools/watch-repository-enhanced.js';
 import { info, error } from './logger.js';
 
 const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
@@ -16,17 +15,15 @@ const REPO_CONFIG_DIR = path.join(process.cwd(), 'repo-configs');
 export class RepositoryConfigLoader {
   private server: Server;
   private apiClient: ApiClient;
-  private updateHandler: UpdateRepositoryHandler;
-  private addHandler: LocalRepositoryHandler;
-  private watchHandler: WatchRepositoryHandler;
+  private updateTool: UpdateRepositoryEnhancedTool;
+  private watchTool: WatchRepositoryEnhancedTool;
 
   constructor(server: Server, apiClient: ApiClient) {
     this.server = server;
     this.apiClient = apiClient;
-    // Initialize handlers with server and apiClient
-    this.updateHandler = new UpdateRepositoryHandler(server, apiClient);
-    this.addHandler = new LocalRepositoryHandler(server, apiClient);
-    this.watchHandler = new WatchRepositoryHandler(server, apiClient);
+    // Initialize tools with apiClient and server (if needed by tools)
+    this.updateTool = new UpdateRepositoryEnhancedTool({ apiClient, server });
+    this.watchTool = new WatchRepositoryEnhancedTool({ apiClient, server });
   }
 
   /**
@@ -74,13 +71,14 @@ export class RepositoryConfigLoader {
           // For startup loading, we treat all found configs as needing an update/re-index
           // This ensures consistency with the current state of the files on disk
           info(`Initializing repository: ${repoConfig.name}`);
-          await this.updateHandler.handle(repoConfig); // Use updateHandler for initial load
+          // Use execute method of the enhanced tool. The repoConfig itself is the argument.
+          await this.updateTool.execute(repoConfig); 
 
           // Start watching if configured
           if (repoConfig.watchMode) {
             info(`Starting watch for repository: ${repoConfig.name}`);
             // Pass undefined for callContext as this is a server-initiated watch
-            await this.watchHandler.handle({
+            await this.watchTool.execute({
               name: repoConfig.name,
               action: 'start'
             }, undefined);

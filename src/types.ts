@@ -46,7 +46,8 @@ export interface ToolDefinition {
 export interface McpToolResponse {
   content: Array<{
     type: string;
-    text: string;
+    text?: string; // Make text optional as content can be json
+    json?: any; // Add optional json property
   }>;
   isError?: boolean;
 }

@@ -629,6 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error('Failed to search');
             
             const data = await response.json();
+            console.log('Search results data:', data); // Log the data here
             displaySearchResults(data.results);
         } catch (error) {
             console.error('Error searching:', error);

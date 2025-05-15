@@ -4,17 +4,12 @@ import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { ApiClient } from "./api-client.js";
-import { ClearQueueEnhancedTool } from "./tools/clear-queue-enhanced.js";
-import { ExtractUrlsEnhancedTool } from "./tools/extract-urls-enhanced.js";
-import { ListQueueEnhancedTool } from "./tools/list-queue-enhanced.js";
-import { ListSourcesEnhancedTool } from "./tools/list-sources-enhanced.js";
-import { RemoveDocumentationEnhancedTool } from "./tools/remove-documentation-enhanced.js";
-import { RunQueueEnhancedTool } from "./tools/run-queue-enhanced.js";
-import { SearchDocumentationEnhancedTool } from "./tools/search-documentation-enhanced.js"; // Import the enhanced tool
+import { EnhancedHandlerRegistry } from "./handler-registry-enhanced.js";
 import { info, error } from './utils/logger.js';
-import { LLMService } from "./services/llm.js";
+import { LLMService } from "./services/llm.js"; // Keep import for type definition
 import { RepositoryConfig } from "./types.js"; // Keep import for type definition
 import fsPromises from 'fs/promises'; // Import promises API
+import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -50,13 +45,11 @@ interface Document {
 }
 
 interface QueueItem {
-  id: string;
+  id: number;
   url: string;
   status: string;
   timestamp: string;
 }
-
-import net from 'net';
 
 function getAvailablePort(startPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -75,33 +68,23 @@ function getAvailablePort(startPort: number): Promise<number> {
   });
 }
 
-export class WebInterface {
+export class WebInterfaceEnhanced {
   private app: Application;
   private server: any;
-  private apiClient: ApiClient;
-  private llmService: LLMService;
-  private searchTool!: SearchDocumentationEnhancedTool; // Use the enhanced tool
-  private runQueueTool!: RunQueueEnhancedTool; // Use definite assignment assertion
-  private listQueueTool!: ListQueueEnhancedTool; // Use definite assignment assertion
-  private listSourcesTool!: ListSourcesEnhancedTool; // Use definite assignment assertion
-  private clearQueueTool!: ClearQueueEnhancedTool; // Use definite assignment assertion
-  private removeDocTool!: RemoveDocumentationEnhancedTool; // Use definite assignment assertion
-  private extractUrlsTool!: ExtractUrlsEnhancedTool; // Use definite assignment assertion
+  private handlerRegistry: EnhancedHandlerRegistry;
+  private apiClient: ApiClient; // Add apiClient property
   private queuePath: string;
 
-  constructor(apiClient: ApiClient, llmService: LLMService) {
-    this.apiClient = apiClient;
-    this.llmService = llmService;
+  constructor(handlerRegistry: EnhancedHandlerRegistry, apiClient: ApiClient) { // Accept apiClient in constructor
+    this.handlerRegistry = handlerRegistry;
+    this.apiClient = apiClient; // Assign apiClient
     this.app = express();
     this.queuePath = join(rootDir, "queue.txt");
-
-    // Handlers and tools that require the server instance will be initialized in start()
 
     // Ensure queue file exists
     this.initializeQueueFile();
 
     this.setupMiddleware();
-    // Routes are set up here, but tools are not yet fully initialized
     this.setupRoutes();
   }
 
@@ -128,7 +111,7 @@ export class WebInterface {
   }
 
   private setupRoutes() {
-    info('Setting up server routes...');
+    info('Setting up enhanced server routes...');
     const errorHandler = (
       err: ApiError,
       req: Request,
@@ -151,7 +134,6 @@ export class WebInterface {
 
     info('Defining /documents route...');
     // Get all available documents
-    // Get all available documents
     this.app.get(
       "/documents",
       async (
@@ -160,7 +142,11 @@ export class WebInterface {
         next: NextFunction
       ): Promise<void> => {
         try {
-          const response = await this.listSourcesTool.execute({});
+          const listSourcesTool = this.handlerRegistry.getTool('list_sources');
+          if (!listSourcesTool) {
+             throw new Error('List sources tool not found in registry');
+          }
+          const response = await listSourcesTool.execute({});
           const sourcesText = response.content?.[0]?.text ?? ''; // Use optional chaining and nullish coalescing
 
           if (
@@ -239,17 +225,17 @@ export class WebInterface {
                 chunkSize: repoConfig.chunkSize,
                 fileTypeConfig: repoConfig.fileTypeConfig
               });
-    } catch (err) {
-      error(`Error reading or parsing repository config file ${configPath}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+            } catch (err) {
+              error(`Error loading repository config file ${file} for /repositories endpoint: ${err instanceof Error ? err.message : String(err)}. Skipping.`);
+            }
+          }
 
           info(`Returning ${repositories.length} repositories for /repositories endpoint`);
           res.json(repositories);
 
-        } catch (err) {
-          error(`Error in /repositories endpoint: ${err instanceof Error ? err.message : String(err)}`);
-          next(err); // Pass other errors to the error handler
+        } catch (error: any) {
+          error(`Error in /repositories endpoint: ${error.message}`);
+          next(error); // Pass other errors to the error handler
         }
       }
     );
@@ -272,11 +258,15 @@ export class WebInterface {
 
         const pendingUrls = queueContent
           .split("\n")
-          .filter((line) => line.trim());
+          .filter((line: string) => line.trim());
         info(`Pending URLs: ${pendingUrls.join(', ')}`);
 
         // Get processing status from list-queue tool
-        const response = await this.listQueueTool.execute({});
+        const listQueueTool = this.handlerRegistry.getTool('list_queue');
+        if (!listQueueTool) {
+           throw new Error('List queue tool not found in registry');
+        }
+        const response = await listQueueTool.execute({});
         info(`List queue tool response: ${JSON.stringify(response)}`);
 
         const queueText = response.content?.[0]?.text ?? ''; // Use optional chaining and nullish coalescing
@@ -353,7 +343,7 @@ export class WebInterface {
             await fs.promises.appendFile(this.queuePath, separator + u);
 
             addedItems.push({
-              id: Buffer.from(u).toString("base64"), // Consistent ID format
+              id: Date.now(),
               url: u,
               status: "PENDING",
               timestamp: new Date().toISOString(),
@@ -361,8 +351,12 @@ export class WebInterface {
           }
 
           // Start processing queue in background
-          this.runQueueTool.execute({}).catch((err: Error) => {
-            error(`Error processing queue: ${err.message}`);
+          const runQueueTool = this.handlerRegistry.getTool('run_queue');
+          if (!runQueueTool) {
+             throw new Error('Run queue tool not found in registry');
+          }
+          runQueueTool.execute({}).catch((err: any) => {
+            error(`Error processing queue: ${err instanceof Error ? err.message : String(err)}`);
           });
 
           res.json(addedItems);
@@ -388,21 +382,24 @@ export class WebInterface {
             throw error;
           }
 
-          info('Server: Calling searchTool.execute...'); // Log calling the tool
-          const searchResponse = await this.searchTool.execute({ query }); // Call the tool's execute method
-          info('Server: searchTool.execute successful.'); // Log successful tool execution
+          const searchDocumentationTool = this.handlerRegistry.getTool('search_documentation');
+          if (!searchDocumentationTool) {
+             throw new Error('Search documentation tool not found in registry');
+          }
 
-          // The tool is now expected to return a structured JSON response directly
-          // We can simplify the response processing here
+          info('Server: Calling searchDocumentationTool.execute...'); // Log calling the tool
+          const searchResponse = await searchDocumentationTool.execute({ query, returnFormat: 'json' }); // Call the tool's execute method
+          info('Server: searchDocumentationTool.execute successful.'); // Log successful tool execution
 
+          // The enhanced tool is expected to return a structured JSON response directly
           if (searchResponse.content && searchResponse.content.length > 0 && searchResponse.content[0] && searchResponse.content[0].type === 'json' && searchResponse.content[0].json) {
              const responseData = searchResponse.content[0].json;
              const results: SearchResponse['results'] = responseData.results || [];
              res.json({ results });
           } else {
              // Handle unexpected response format from the tool
-             error(`Unexpected response format from search tool: ${JSON.stringify(searchResponse)}`);
-             res.status(500).json({ error: 'Unexpected response format from search tool' });
+             error(`Unexpected response format from search documentation tool: ${JSON.stringify(searchResponse)}`);
+             res.status(500).json({ error: 'Unexpected response format from search documentation tool' });
           }
 
         } catch (error) {
@@ -416,15 +413,24 @@ export class WebInterface {
       "/clear-queue",
       async (req: Request, res: Response, next: NextFunction) => {
         try {
+          const clearQueueTool = this.handlerRegistry.getTool('clear_queue');
+          if (!clearQueueTool) {
+             throw new Error('Clear queue tool not found in registry');
+          }
+          const runQueueTool = this.handlerRegistry.getTool('run_queue');
+          if (!runQueueTool) {
+             throw new Error('Run queue tool not found in registry');
+          }
+
           // Call the clear queue tool
-          const response = await this.clearQueueTool.execute({});
+          const response = await clearQueueTool.execute({});
 
           if (response.isError) {
             throw new Error(response.content[0].text);
           }
 
           // Also clear any running processes
-          await this.runQueueTool.execute({ action: "stop" });
+          await runQueueTool.execute({ action: "stop" });
 
           // Ensure the queue file is empty
           await fs.promises.writeFile(this.queuePath, "", "utf8");
@@ -441,9 +447,13 @@ export class WebInterface {
       "/process-queue",
       async (req: Request, res: Response, next: NextFunction) => {
         try {
+          const runQueueTool = this.handlerRegistry.getTool('run_queue');
+          if (!runQueueTool) {
+             throw new Error('Run queue tool not found in registry');
+          }
           // Start processing queue in background
-          this.runQueueTool.execute({}).catch((err: Error) => {
-            error(`Error processing queue: ${err.message}`);
+          runQueueTool.execute({}).catch((err: any) => {
+            error(`Error processing queue: ${err instanceof Error ? err.message : String(err)}`);
           });
 
           res.json({ message: "Queue processing started" });
@@ -467,8 +477,13 @@ export class WebInterface {
             throw error;
           }
 
+          const removeDocumentationTool = this.handlerRegistry.getTool('remove_documentation');
+          if (!removeDocumentationTool) {
+             throw new Error('Remove documentation tool not found in registry');
+          }
+
           const urlsToRemove = urls || [url];
-          await this.removeDocTool.execute({ urls: urlsToRemove });
+          await removeDocumentationTool.execute({ urls: urlsToRemove });
           res.json({
             message: `${urlsToRemove.length} document${
               urlsToRemove.length === 1 ? "" : "s"
@@ -486,8 +501,17 @@ export class WebInterface {
       "/documents/all",
       async (req: Request, res: Response, next: NextFunction) => {
         try {
+          const listSourcesTool = this.handlerRegistry.getTool('list_sources');
+          if (!listSourcesTool) {
+             throw new Error('List sources tool not found in registry');
+          }
+          const removeDocumentationTool = this.handlerRegistry.getTool('remove_documentation');
+          if (!removeDocumentationTool) {
+             throw new Error('Remove documentation tool not found in registry');
+          }
+
           // First get all documents
-          const response = await this.listSourcesTool.execute({});
+          const response = await listSourcesTool.execute({});
           const sourcesText = response.content?.[0]?.text ?? ''; // Use optional chaining and nullish coalescing
 
           if (
@@ -513,7 +537,7 @@ export class WebInterface {
           }
 
           // Remove all documents
-          await this.removeDocTool.execute({ urls });
+          await removeDocumentationTool.execute({ urls });
           res.json({
             message: `${urls.length} document${
               urls.length === 1 ? "" : "s"
@@ -538,7 +562,12 @@ export class WebInterface {
             throw error;
           }
 
-          const response = await this.extractUrlsTool.execute({ url });
+          const extractUrlsTool = this.handlerRegistry.getTool('extract_urls');
+          if (!extractUrlsTool) {
+             throw new Error('Extract URLs tool not found in registry');
+          }
+
+          const response = await extractUrlsTool.execute({ url });
           const urls = (response.content?.[0]?.text ?? '')
             .split("\n")
             .filter((url: string) => url.trim());
@@ -562,8 +591,13 @@ export class WebInterface {
             throw error;
           }
 
+          const searchDocumentationTool = this.handlerRegistry.getTool('search_documentation');
+          if (!searchDocumentationTool) {
+             throw new Error('Search documentation tool not found in registry');
+          }
+
           // Call the search tool with generateFileDescriptions enabled
-          const response = await this.searchTool.execute({
+          const response = await searchDocumentationTool.execute({
             query,
             limit: limit || 10,
             generateFileDescriptions: true,
@@ -576,8 +610,8 @@ export class WebInterface {
             res.json(result);
           } else {
             // Handle the case where the response content is not as expected
-            error(`Unexpected response format from search tool for file descriptions: ${JSON.stringify(response)}`);
-            const apiError: ApiError = new Error("Invalid response format from search tool for file descriptions."); // Renamed variable
+            error(`Unexpected response format from search documentation tool for file descriptions: ${JSON.stringify(response)}`);
+            const apiError: ApiError = new Error("Invalid response format from search documentation tool for file descriptions."); // Renamed variable
             apiError.status = 500;
             next(apiError); // Pass the renamed variable
           }
@@ -591,7 +625,7 @@ export class WebInterface {
     this.app.get("/status", (req: Request, res: Response) => {
       res.json({
         status: "ok", // Indicate server is running
-        llmStatus: this.llmService.getAvailabilityStatus(),
+        llmStatus: this.apiClient.llmService.getAvailabilityStatus(),
       });
     });
 
@@ -601,27 +635,16 @@ export class WebInterface {
   async start() {
     const port = await getAvailablePort(3030);
     this.server = this.app.listen(port, () => {
-      info(`Web interface running at http://localhost:${port}`);
-      info(`Server started successfully on port ${port}`);
+      info(`Enhanced web interface running at http://localhost:${port}`);
+      info(`Enhanced server started successfully on port ${port}`);
     });
-
-    // Initialize tools that require the server instance or apiClient here
-    this.searchTool = new SearchDocumentationEnhancedTool({ apiClient: this.apiClient }); // Initialize search tool
-    this.runQueueTool = new RunQueueEnhancedTool({ apiClient: this.apiClient, server: this.server }); // Initialize run queue tool
-    this.listQueueTool = new ListQueueEnhancedTool(); // Initialize list queue tool
-    this.listSourcesTool = new ListSourcesEnhancedTool(this.apiClient); // Initialize list sources tool
-    this.clearQueueTool = new ClearQueueEnhancedTool(); // Initialize clear queue tool
-    this.removeDocTool = new RemoveDocumentationEnhancedTool(this.apiClient); // Initialize remove doc tool
-    this.extractUrlsTool = new ExtractUrlsEnhancedTool(this.apiClient); // Initialize extract urls tool
-
-    // Note: Other tools might also need to be moved here if they require the server instance or apiClient.
   }
 
   async stop() {
     if (this.server) {
       return new Promise((resolve) => {
         this.server.close(() => {
-          info("Web interface stopped");
+          info("Enhanced web interface stopped");
           resolve(true);
         });
       });

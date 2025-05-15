@@ -8,25 +8,37 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/build/index.js",
+            "program": "${workspaceFolder}/src/index.ts",
             "outFiles": [
                 "${workspaceFolder}/build/**/*.js"
             ],
             "envFile": "${workspaceFolder}/.env",
-            "preLaunchTask": "npm run build"
+            "preLaunchTask": "npm run build",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "runtimeArgs": [
+                "--loader",
+                "ts-node/esm"
+            ]
         },
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch Program",
+            "name": "Launch Program (No Build)",
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/build/index.js",
+            "program": "${workspaceFolder}/src/index.ts",
             "outFiles": [
                 "${workspaceFolder}/build/**/*.js"
             ],
             "envFile": "${workspaceFolder}/.env",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "runtimeArgs": [
+                "--loader",
+                "ts-node/esm"
+            ]
         },
         {
             "type": "chrome",

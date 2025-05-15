@@ -62,32 +62,33 @@ An MCP server implementation that provides tools for retrieving and processing d
    - Chunks content intelligently for optimal retrieval
    - Required parameter: `url` (must include protocol, e.g., https://)
 
-9. **add_repository**
-   - Index a local code repository for documentation
-   - Configure include/exclude patterns for files and directories
-   - Supports different chunking strategies based on file types
-   - Uses asynchronous processing to avoid MCP timeouts with large repositories
-   - Provides detailed progress logging (heartbeat) to `stderr` during indexing
-   - Required parameter: `path` (absolute path to repository)
+9. **local_repository**
+   - Adds and indexes a local code repository.
+   - Configurable include/exclude patterns, chunking strategies, and optional watch mode.
+   - Uses asynchronous processing for large repositories, with progress tracking via `get_indexing_status`.
+   - Manages persistent indexing state to avoid re-indexing unchanged files.
+   - Required parameter: `path` (absolute or relative path). Optional: `name`, `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`.
 
-10. **list_repositories**
-    - List all indexed repositories with their configurations
+10. **list_repositories** (Enhanced)
+    - Lists all configured documentation repositories. This tool has been migrated to the enhanced architecture.
     - Shows include/exclude patterns and watch status
 
-11. **update_repository**
-    - Re-index a repository with updated configuration
-    - Can modify include/exclude patterns and other settings
-    - Provides detailed progress logging (heartbeat) to `stderr) during re-indexing
+11. **update_repository** (Enhanced)
+    - Updates an existing documentation repository configuration and re-indexes its content.
+    - This tool has been migrated to the enhanced architecture (`src/tools/update-repository-enhanced.ts`).
+    - Can modify include/exclude patterns and other settings.
+    - Provides detailed progress logging (heartbeat) to `stderr` during re-indexing.
+    - Required parameter: `name` (repository name). Optional: `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`.
+
+12. **remove_repository** (Enhanced)
+    - Removes a configured documentation repository and its indexed documents.
+    - This tool has been migrated to the enhanced architecture.
+    - Deletes all associated documents from the vector database.
     - Required parameter: `name` (repository name)
 
-12. **remove_repository**
-    - Remove a repository from the index
-    - Deletes all associated documents from the vector database
-    - Required parameter: `name` (repository name)
-
-13. **watch_repository**
-    - Start or stop watching a repository for changes
-    - Automatically updates the index when files change
+13. **watch_repository** (Enhanced)
+    - Start or stop watching a configured repository for changes
+    - Automatically updates the index when files change using the `update_repository` tool.
     - Required parameters: `name` (repository name) and `action` ("start" or "stop")
 
 14. **get_indexing_status**
@@ -130,7 +131,7 @@ docker-compose down
 
 ## Web Interface
 
-The system includes a web interface that can be accessed after starting the Docker Compose services:
+The system includes an enhanced web interface (`src/server-enhanced.ts`) that can be accessed after starting the Docker Compose services. This interface has been updated to directly use the enhanced tools from the consolidated architecture.
 
 1. Open your browser and navigate to: `http://localhost:3030`
 2. The interface provides:
@@ -211,7 +212,7 @@ When launching the server via Cline, add this to your `cline_mcp_settings.json`:
         "run_queue",
         "clear_queue",
         "add_documentation",
-        "add_repository",
+        "local_repository",
         "list_repositories",
         "update_repository",
         "remove_repository",
@@ -256,7 +257,7 @@ When launching the server via Claude Desktop, add this to your `claude_desktop_c
         "run_queue",
         "clear_queue",
         "add_documentation",
-        "add_repository",
+        "local_repository",
         "list_repositories",
         "update_repository",
         "remove_repository",
@@ -345,7 +346,7 @@ The system supports indexing local code repositories, making their content searc
 
 Example usage:
 ```
-add_repository with {
+local_repository with {
   "path": "/path/to/your/repo",
   "name": "my-project",
   "include": ["**/*.js", "**/*.ts", "**/*.md"],

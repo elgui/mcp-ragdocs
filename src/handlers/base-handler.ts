@@ -3,10 +3,10 @@ import { ApiClient } from '../api-client.js';
 import { McpToolResponse } from '../types.js';
 
 export abstract class BaseHandler {
-  protected server: Server;
+  protected server: any; // Change type to any
   protected apiClient: ApiClient;
 
-  constructor(server: Server, apiClient: ApiClient) {
+  constructor(server: any, apiClient: ApiClient) { // Change type to any
     this.server = server;
     this.apiClient = apiClient;
   }
