@@ -259,7 +259,6 @@ export class WebInterfaceEnhanced {
         const pendingUrls = queueContent
           .split("\n")
           .filter((line: string) => line.trim());
-        info(`Pending URLs: ${pendingUrls.join(', ')}`);
 
         // Get processing status from list-queue tool
         const listQueueTool = this.handlerRegistry.getTool('list_queue');
@@ -270,7 +269,6 @@ export class WebInterfaceEnhanced {
         info(`List queue tool response: ${JSON.stringify(response)}`);
 
         const queueText = response.content?.[0]?.text ?? ''; // Use optional chaining and nullish coalescing
-        info(`Queue text from tool: ${queueText}`);
 
         const processingItems = queueText
           .split("\n")
@@ -284,25 +282,48 @@ export class WebInterfaceEnhanced {
               timestamp: timestamp || new Date().toISOString(),
             };
           });
-        info(`Processing items: ${JSON.stringify(processingItems)}`);
 
-        // Combine pending and processing items
-        const queue = [
-          // Add pending items that aren't in processing
-          ...pendingUrls
-            .filter((url) => !processingItems.some((item: QueueItem) => item.url === url))
-            .map((url) => ({
-              id: Buffer.from(url).toString("base64"),
-              url,
-              status: "PENDING",
-              timestamp: new Date().toISOString(),
-            })),
-          // Add processing items
-          ...processingItems,
-        ];
-        info(`Final queue: ${JSON.stringify(queue)}`);
+        const isQueueEmpty = pendingUrls.length === 0 && processingItems.length === 0;
 
-        res.json(queue);
+        if (!isQueueEmpty) {
+          info(`Queue file content: ${queueContent}`);
+          info(`Pending URLs: ${pendingUrls.join(', ')}`);
+          info(`List queue tool response: ${JSON.stringify(response)}`);
+          info(`Queue text from tool: ${queueText}`);
+          info(`Processing items: ${JSON.stringify(processingItems)}`);
+          // Combine pending and processing items
+          const queue = [
+            // Add pending items that aren't in processing
+            ...pendingUrls
+              .filter((url) => !processingItems.some((item: QueueItem) => item.url === url))
+              .map((url) => ({
+                id: Buffer.from(url).toString("base64"),
+                url,
+                status: "PENDING",
+                timestamp: new Date().toISOString(),
+              })),
+            // Add processing items
+            ...processingItems,
+          ];
+          info(`Final queue: ${JSON.stringify(queue)}`);
+          res.json(queue);
+        } else {
+          // Combine pending and processing items
+          const queue = [
+            // Add pending items that aren't in processing
+            ...pendingUrls
+              .filter((url) => !processingItems.some((item: QueueItem) => item.url === url))
+              .map((url) => ({
+                id: Buffer.from(url).toString("base64"),
+                url,
+                status: "PENDING",
+                timestamp: new Date().toISOString(),
+              })),
+            // Add processing items
+            ...processingItems,
+          ];
+          res.json(queue);
+        }
       } catch (err) {
         error(`Error getting queue: ${err instanceof Error ? err.message : String(err)}`);
         res.json([]);
@@ -392,11 +413,17 @@ export class WebInterfaceEnhanced {
           const searchResponse = await searchDocumentationTool.execute({ query, score_threshold, returnFormat: 'json' });
           info('Server: searchDocumentationTool.execute successful.'); // Log successful tool execution
 
-          // The enhanced tool is expected to return a structured JSON response directly
-          if (searchResponse.content && searchResponse.content.length > 0 && searchResponse.content[0] && searchResponse.content[0].type === 'json' && searchResponse.content[0].json) {
-             const responseData = searchResponse.content[0].json;
-             const results: SearchResponse['results'] = responseData.results || [];
-             res.json({ results });
+          // The enhanced tool is expected to return a structured JSON response within a text type
+          // We need to parse the text content
+          if (searchResponse.content && searchResponse.content.length > 0 && searchResponse.content[0] && searchResponse.content[0].type === 'text' && searchResponse.content[0].text) {
+             try {
+               const responseData = JSON.parse(searchResponse.content[0].text);
+               const results: SearchResponse['results'] = responseData.results || [];
+               res.json({ results });
+             } catch (parseError) {
+               error(`Error parsing JSON response from search documentation tool: ${parseError}`);
+               res.status(500).json({ error: 'Error parsing search documentation tool response' });
+             }
           } else {
              // Handle unexpected response format from the tool
              error(`Unexpected response format from search documentation tool: ${JSON.stringify(searchResponse)}`);
@@ -605,16 +632,23 @@ export class WebInterfaceEnhanced {
             returnFormat: 'json' // Ensure the tool returns JSON
           });
 
-          // Access the JSON response directly from the tool's response
-          if (response.content && response.content.length > 0 && response.content[0] && response.content[0].type === 'json' && response.content[0].json) {
-            const result = response.content[0].json;
-            res.json(result);
+          // Access the JSON response from the tool's response (now within text type)
+          if (response.content && response.content.length > 0 && response.content[0] && response.content[0].type === 'text' && response.content[0].text) {
+            try {
+              const result = JSON.parse(response.content[0].text);
+              res.json(result);
+            } catch (parseError) {
+              error(`Error parsing JSON response from search documentation tool for file descriptions: ${parseError}`);
+              const apiError: ApiError = new Error("Error parsing search documentation tool response for file descriptions.");
+              apiError.status = 500;
+              next(apiError);
+            }
           } else {
             // Handle the case where the response content is not as expected
             error(`Unexpected response format from search documentation tool for file descriptions: ${JSON.stringify(response)}`);
-            const apiError: ApiError = new Error("Invalid response format from search documentation tool for file descriptions."); // Renamed variable
+            const apiError: ApiError = new Error("Invalid response format from search documentation tool for file descriptions.");
             apiError.status = 500;
-            next(apiError); // Pass the renamed variable
+            next(apiError);
           }
         } catch (error) {
           next(error);

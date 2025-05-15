@@ -145,7 +145,7 @@ export class UpdateRepositoryEnhancedTool extends EnhancedBaseTool {
       }
 
       // Remove existing repository documents from the vector database
-      console.info(`[${config.name}] Removing existing documents from vector database...`);
+      info(`[${config.name}] Removing existing documents from vector database...`);
       if (activeProgressToken) {
         (server as any).sendProgress(activeProgressToken, { message: "Removing existing documents...", percentageComplete: 50 }); // 50% after deletion
       }
@@ -196,7 +196,7 @@ export class UpdateRepositoryEnhancedTool extends EnhancedBaseTool {
       let indexedChunks = 0;
       const totalChunks = chunks.length;
 
-      console.info(`[${config.name}] Starting to generate embeddings and re-index ${totalChunks} chunks...`);
+      info(`[${config.name}] Starting to generate embeddings and re-index ${totalChunks} chunks...`);
       if (activeProgressToken) {
         (server as any).sendProgress(activeProgressToken, { message: `Starting to generate embeddings for ${totalChunks} chunks...`, percentageComplete: 50 });
       }
@@ -312,7 +312,7 @@ export class UpdateRepositoryEnhancedTool extends EnhancedBaseTool {
     });
     const totalFiles = files.length;
 
-    console.info(`[${config.name}] Found ${totalFiles} files to re-process based on include/exclude patterns.`);
+    info(`[${config.name}] Found ${totalFiles} files to re-process based on include/exclude patterns.`);
     if (activeProgressToken) {
       (this.server as any).sendProgress(activeProgressToken, { message: `Found ${totalFiles} files to re-process.` });
     }
@@ -403,7 +403,7 @@ export class UpdateRepositoryEnhancedTool extends EnhancedBaseTool {
         if (fileCounter % 50 === 0 && fileCounter > 0 && activeProgressToken) {
           const percentageComplete = Math.round((fileCounter / totalFiles) * 25);
           (this.server as any).sendProgress(activeProgressToken, { message: `Re-processed ${fileCounter} of ${totalFiles} files...`, percentageComplete });
-          console.info(`[${config.name}] Re-processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
+          info(`[${config.name}] Re-processed ${fileCounter} of ${totalFiles} files... (${processedFiles} successful, ${skippedFiles} skipped/errored)`);
         }
       } catch (err) {
         error(`[${repositoryId}] Error processing file ${relativePath} (File ID: ${fileId}): ${err instanceof Error ? err.message : String(err)}`);

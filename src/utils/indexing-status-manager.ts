@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { IndexingStatus } from '../types.js';
+import { error } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATUS_DIR = path.join(__dirname, '..', 'indexing-status');
@@ -87,14 +88,14 @@ export class IndexingStatusManager {
         try {
           const content = await fs.readFile(path.join(STATUS_DIR, file), 'utf-8');
           statuses.push(JSON.parse(content) as IndexingStatus);
-        } catch (error) {
-          console.error(`Error reading status file ${file}:`, error);
+        } catch (err) {
+          error(`Error reading status file ${file}:`+ err);
         }
       }
       
       return statuses;
-    } catch (error) {
-      console.error('Error reading status directory:', error);
+    } catch (err) {
+      error('Error reading status directory:'+ err);
       return [];
     }
   }
@@ -176,9 +177,9 @@ export class IndexingStatusManager {
   private async ensureStatusDirectory(): Promise<void> {
     try {
       await fs.mkdir(STATUS_DIR, { recursive: true });
-    } catch (error) {
-      console.error('Error creating status directory:', error);
-      throw error;
+    } catch (err) {
+      error('Error creating status directory:'+ err);
+      throw err;
     }
   }
 }

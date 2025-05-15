@@ -1,21 +1,18 @@
 {
   "repositories": [
     {
-      "path": "D:\\Dev\\MCPs\\servers\\src\\filesystem",
-      "name": "mcp-filesystem",
+      "path": "D:\\goali\\repo",
+      "name": "goali",
       "include": [
         "**/*.md",
-        "**/*.ts",
-        "**/*.js",
-        "**/*.html"
+        "**/*.py"
       ],
       "exclude": [
         "**/node_modules/**",
         "**/.git/**",
         "**/*_generated.*",
         "**/__pycache__/",
-        "**/myenv/",
-        "**/.git/",
+        "**/myenv/**",
         "**/backend/docs/build/",
         "**/backend/apps/main/tests/test_data/",
         "**/frontend/**",

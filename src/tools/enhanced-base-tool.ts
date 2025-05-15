@@ -51,8 +51,8 @@ export abstract class EnhancedBaseTool {
     return {
       content: [
         {
-          type: 'json',
-          json: data,
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
         },
       ],
     };

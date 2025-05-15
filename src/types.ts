@@ -45,9 +45,14 @@ export interface ToolDefinition {
 
 export interface McpToolResponse {
   content: Array<{
-    type: string;
-    text?: string; // Make text optional as content can be json
-    json?: any; // Add optional json property
+    type: 'text' | 'image' | 'resource';
+    text?: string;
+    data?: string; // For image data (base64)
+    mimeType?: string; // For image mime type
+    resource?: { // For resource type
+      uri: string;
+      metadata?: any;
+    };
   }>;
   isError?: boolean;
 }

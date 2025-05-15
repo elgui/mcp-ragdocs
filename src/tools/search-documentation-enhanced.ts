@@ -1,6 +1,8 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { McpToolResponse, isDocumentPayload } from '../types.js';
 import { EnhancedBaseTool } from './enhanced-base-tool.js';
+import { error, info } from '../utils/logger.js';
+import debug from 'debug';
 
 const COLLECTION_NAME = 'documentation';
 
@@ -48,12 +50,13 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
           }
         },
         required: ['query'],
+        additionalProperties: false,
       },
     };
   }
 
   async execute(args: any, callContext?: { progressToken?: string | number, requestId: string | number }): Promise<McpToolResponse> {
-    console.log('SearchDocumentationTool: execute method invoked with args:', args);
+    info('SearchDocumentationTool: execute method invoked with args:'+ args);
 
     if (!args.query || typeof args.query !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'Query is required');
@@ -66,11 +69,11 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
     const limit = args.limit || 5;
 
     try {
-      console.log('SearchDocumentationTool: Calling getEmbeddings with query:', args.query);
+      info('SearchDocumentationTool: Calling getEmbeddings with query:'+ args.query);
       const queryEmbedding = await this.apiClient.getEmbeddings(args.query);
-      console.log('SearchDocumentationTool: getEmbeddings successful. Query embedding generated.');
+      info('SearchDocumentationTool: getEmbeddings successful. Query embedding generated.');
 
-      console.log('SearchDocumentationTool: Parsing query for potential filters...');
+      info('SearchDocumentationTool: Parsing query for potential filters...');
       // Parse the query for potential filters
       const filters: any = {};
       
@@ -109,9 +112,9 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
         }
       }
       
-      console.log('SearchDocumentationTool: Using search filters:', filters);
+      debug('SearchDocumentationTool: Using search filters:'+ filters);
       
-      console.log('SearchDocumentationTool: Building search filter...');
+      debug('SearchDocumentationTool: Building search filter...');
       // Build the search filter if any filters were detected
       const filterParams: any = {};
       if (Object.keys(filters).length > 0) {
@@ -146,10 +149,10 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
         }
       }
       
-      console.log('SearchDocumentationTool: Search filter built:', filterParams);
-      
+      debug('SearchDocumentationTool: Search filter built:'+ filterParams);
+    
       const finalScoreThreshold = args.score_threshold !== undefined ? args.score_threshold : 0.65;
-      console.log('SearchDocumentationTool: Calling qdrantClient.search with score_threshold:', finalScoreThreshold);
+      debug('SearchDocumentationTool: Calling qdrantClient.search with score_threshold:'+ finalScoreThreshold);
       // Optimize the search parameters for better results
       const searchResults = await this.apiClient.qdrantClient.search(COLLECTION_NAME, {
         vector: queryEmbedding,
@@ -164,9 +167,9 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
         }
       });
       
-      console.log(`SearchDocumentationTool: qdrantClient.search successful, found ${searchResults.length} results.`);
+      debug(`SearchDocumentationTool: qdrantClient.search successful, found ${searchResults.length} results.`);
 
-      console.log('SearchDocumentationTool: Sorting and slicing results...');
+      debug('SearchDocumentationTool: Sorting and slicing results...');
       // Sort results to prioritize docstrings over code
       const sortedResults = searchResults
         .sort((a, b) => {
@@ -180,12 +183,12 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
           return b.score - a.score;
         })
         .slice(0, limit); // Take only the requested number after sorting
-      console.log(`SearchDocumentationTool: Sorted and sliced results, keeping ${sortedResults.length} results.`);
+      debug(`SearchDocumentationTool: Sorted and sliced results, keeping ${sortedResults.length} results.`);
 
-      console.log('SearchDocumentationTool: Formatting results...');
+      debug('SearchDocumentationTool: Formatting results...');
       const formattedResults = sortedResults.map(result => {
         if (!isDocumentPayload(result.payload)) {
-          console.error('SearchDocumentationTool: Invalid payload type encountered:', result.payload);
+          error('SearchDocumentationTool: Invalid payload type encountered:'+ result.payload);
           throw new Error('Invalid payload type');
         }
 
@@ -200,15 +203,16 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
         };
       });
 
-      console.log('SearchDocumentationTool: Results formatted. Returning response.');
-      return this.formatJsonResponse({
-        results: formattedResults.length > 0 ? formattedResults : [],
-        message: formattedResults.length > 0 ? 'Search successful' : 'No results found matching the query.',
-        filters: Object.keys(filters).length > 0 ? filters : undefined
-      });
-    } catch (error: any) {
-      console.error('SearchDocumentationTool: Backend search error:', error);
-      console.error('SearchDocumentationTool: Error details:', error);
+      debug('SearchDocumentationTool: Results formatted. Returning response.');
+      // Construct the response with content blocks directly
+      return {
+        content: formattedResults.map(result => ({ type: 'text', text: result.content })),
+        // Include other relevant fields in the response if needed
+        // For now, just returning content and isError (from catch block)
+      };
+    } catch (err: any) {
+      error('SearchDocumentationTool: Backend search error:'+ err);
+      error('SearchDocumentationTool: Error details:'+ err);
       if (error instanceof McpError) {
         throw error; // Re-throw known MCP errors
       }
@@ -216,11 +220,8 @@ export class SearchDocumentationEnhancedTool extends EnhancedBaseTool {
       return {
         content: [
           {
-            type: 'json',
-            json: {
-              results: [],
-              message: `Search failed: ${(error as Error).message || error}`,
-            }
+            type: 'text',
+            text: `Search failed: ${(err as Error).message || error}`,
           },
         ],
         isError: true,

@@ -130,8 +130,8 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBeUndefined(); // Or `toBe(false)` if explicitly set
-    expect(result.content[0].type).toBe('json');
-    const jsonResponse = result.content[0].json;
+    expect(result.content[0].type).toBe('text');
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
     expect(jsonResponse.results).toEqual([]);
     expect(jsonResponse.message).toBe('No results found matching the query.');
   });
@@ -148,7 +148,8 @@ describe('SearchDocumentationEnhancedTool', () => {
     const args = { query, limit: 2 }; // Limit to 2 to test slicing after sort
     const result = await searchTool.execute(args);
     
-    const jsonResponse = result.content[0].json;
+    expect(result.content[0].type).toBe('text');
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
     expect(jsonResponse.results).toHaveLength(2);
     // Doc 2 (score 0.9, domain docs) should be first
     expect(jsonResponse.results[0].title).toBe('Documentation Page 1');
@@ -169,8 +170,8 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].type).toBe('json');
-    const jsonResponse = result.content[0].json;
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
     expect(jsonResponse.results).toEqual([]);
     expect(jsonResponse.message).toBe(`Search failed: ${errorMessage}`);
   });
@@ -192,8 +193,8 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].type).toBe('json');
-    const jsonResponse = result.content[0].json;
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
     expect(jsonResponse.results).toEqual([]);
     expect(jsonResponse.message).toBe(`Search failed: ${errorMessage}`);
   });
@@ -215,7 +216,9 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain("Cannot read properties of null (reading 'sort')");
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain("Cannot read properties of null (reading 'sort')");
   });
 
   test('should handle qdrantClient.search returning undefined', async () => {
@@ -225,7 +228,9 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
     
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain("Cannot read properties of undefined (reading 'sort')");
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain("Cannot read properties of undefined (reading 'sort')");
   });
 
   test('should handle qdrantClient.search results with null payload', async () => {
@@ -235,7 +240,9 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain('Search failed: Invalid payload type');
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain('Search failed: Invalid payload type');
   });
 
   test('should handle qdrantClient.search results with invalid payload structure (missing text)', async () => {
@@ -248,7 +255,9 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain('Search failed: Invalid payload type');
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain('Search failed: Invalid payload type');
   });
   
   test('should handle qdrantClient.search results with payload missing title', async () => {
@@ -259,7 +268,9 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain('Search failed: Invalid payload type');
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain('Search failed: Invalid payload type');
   });
 
   test('should handle qdrantClient.search results with payload missing url', async () => {
@@ -270,6 +281,8 @@ describe('SearchDocumentationEnhancedTool', () => {
     const result = await searchTool.execute(args);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].json.message).toContain('Search failed: Invalid payload type');
+    expect(result.content[0].type).toBe('text'); // Expect text type for error
+    const jsonResponse = JSON.parse(result.content[0].text || '{}'); // Parse text content
+    expect(jsonResponse.message).toContain('Search failed: Invalid payload type');
   });
 });

@@ -207,10 +207,16 @@ export class EnhancedHandlerRegistry {
         };
       }
 
-      throw new McpError(
-        ErrorCode.MethodNotFound,
-        `Unknown tool: ${toolName}`
-      );
+      // Instead of throwing McpError, return a formatted error response
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: Unknown tool: ${toolName}`,
+          },
+        ],
+        isError: true,
+      };
     });
   }
 

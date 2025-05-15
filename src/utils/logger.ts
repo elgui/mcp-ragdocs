@@ -8,8 +8,6 @@ const LOG_FILE_PATH = path.join(__dirname, '..', '..', 'mcp-ragdocs.log');
 const log = async (level: string, message: string) => {
   const timestamp = new Date().toISOString();
   const logMessage = `${timestamp} [${level.toUpperCase()}] ${message}\n`;
-  // Also write to stderr so it appears in Claude desktop logs
-  console.error(logMessage);
   try {
     await fs.appendFile(LOG_FILE_PATH, logMessage, 'utf-8');
   } catch (error) {

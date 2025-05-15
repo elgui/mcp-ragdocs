@@ -3,6 +3,7 @@ import path, { dirname } from "path";
 import { fileURLToPath } from "url";
 import { McpToolResponse } from "../types.js";
 import { EnhancedBaseTool } from "./enhanced-base-tool.js";
+import { error } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,10 +47,10 @@ export class ListQueueEnhancedTool extends EnhancedBaseTool {
 
       // Return the URLs with a descriptive header
       return this.formatTextResponse(`Queue contains ${urls.length} URLs:\n${urls.join("\n")}`);
-    } catch (error) {
-      console.error("Error reading queue:", error);
+    } catch (err) {
+      error("Error reading queue:" + err);
       return this.formatResponse({
-        content: [{ type: 'text', text: `Failed to read queue: ${error}` }],
+        content: [{ type: 'text', text: `Failed to read queue: ${err}` }],
         isError: true,
       });
     }

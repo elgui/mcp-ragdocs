@@ -141,7 +141,11 @@ docker-compose down
 The system includes an enhanced web interface (`src/server-enhanced.ts`) that can be accessed after starting the Docker Compose services. This interface has been updated to directly use the enhanced tools from the consolidated architecture.
 
 1. Open your browser and navigate to: `http://localhost:3030`
-2. The interface provides:
+2. You can also run a dedicated MCP-testing web interface using:
+   ```bash
+   npx @modelcontextprotocol/inspector node build/index.js
+   ```
+3. The interface provides:
    - Real-time queue monitoring
    - Documentation source management (URLs and Local Repositories)
    - Search interface for testing queries. The default score threshold in the search interface is 0.1.
@@ -548,7 +552,13 @@ If you're experiencing issues with search results:
    - Ensure your query is relevant to the indexed content
    - Check if appropriate payload indexes are created for your filter fields
 
-3. **Slow Search Performance**:
+3. **Client-side Response Parsing Errors**:
+   - If clients encounter errors parsing the tool response, particularly `invalid_union` on the `content` field, it might be due to incorrect formatting of the response payload.
+   - Ensure that the `content` array in the `McpToolResponse` adheres to the standard `ContentBlock` types ('text', 'image', 'resource').
+   - Specifically, for text-based content, use `type: 'text'` with a plain string in the `text` field. Avoid nesting JSON objects directly within the `text` field or using a non-standard `type` like 'json'.
+   - The `search_documentation` tool was updated to directly construct the `content` array with `type: 'text'` blocks for successful results, resolving a previous issue where `formatJsonResponse` caused incorrect formatting.
+
+4. **Slow Search Performance**:
    - Use the built-in payload indexes for faster filtering
    - Avoid using exact search for large collections
    - Optimize your HNSW index parameters if needed
