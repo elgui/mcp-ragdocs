@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const queueCount = document.getElementById('queueCount');
     const documentsList = document.getElementById('documentsList');
     const searchQuery = document.getElementById('searchQuery');
+    const scoreThresholdInput = document.getElementById('scoreThreshold');
     const searchBtn = document.getElementById('searchBtn');
     const searchResults = document.getElementById('searchResults');
     const toast = document.getElementById('toast');
@@ -602,6 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchResults.innerHTML = results.map(result => `
             <div class="p-4 border border-slate-200 rounded-md hover:bg-slate-50">
                 <a href="${result.url}" target="_blank" class="font-medium text-primary hover:underline">${result.title}</a>
+                <p class="text-sm text-slate-600 mt-2">Score: ${result.score.toFixed(3)}</p> <!-- Display the score -->
                 <p class="text-sm text-slate-600 mt-2">${result.snippet || result.content}</p>
                 <div class="text-xs text-slate-400 mt-1 truncate">${result.url}</div>
             </div>
@@ -611,19 +613,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Search documentation
     searchBtn.addEventListener('click', async () => {
         const query = searchQuery.value.trim();
+        const scoreThreshold = parseFloat(scoreThresholdInput.value);
+
         if (!query) {
             showToast('Please enter a search query', 'error');
             return;
         }
         
+        // Validate score threshold
+        if (isNaN(scoreThreshold) || scoreThreshold < 0 || scoreThreshold > 1) {
+            showToast('Please enter a valid score threshold between 0.0 and 1.0', 'error');
+            scoreThresholdInput.focus();
+            return;
+        }
+
         setButtonLoading(searchBtn, true, 'Searching...');
+        console.log('Sending search query:', query, 'with score_threshold:', scoreThreshold);
         try {
             const response = await fetch(`${API_BASE_URL}/search`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ query })
+                body: JSON.stringify({ query, score_threshold: scoreThreshold })
             });
             
             if (!response.ok) throw new Error('Failed to search');
@@ -645,6 +657,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') {
             searchBtn.click();
         }
+    });
+    
+    // Add click listeners to example searches
+    document.querySelectorAll('.example-search').forEach(example => {
+        example.addEventListener('click', () => {
+            searchQuery.value = example.textContent.replace(/["“”]/g, '').trim();
+            searchQuery.focus(); // Focus the input after setting the value
+        });
     });
     
     // Add URL on Enter key

@@ -12,8 +12,19 @@ An MCP server implementation that provides tools for retrieving and processing d
 - [Docker Compose Setup](#docker-compose-setup)
 - [Web Interface](#web-interface)
 - [Configuration](#configuration)
+  - [Embeddings Configuration](#embeddings-configuration)
+  - [LLM Configuration](#llm-configuration)
+  - [Qdrant Vector Database](#qdrant-vector-database)
   - [Cline Configuration](#cline-configuration)
   - [Claude Desktop Configuration](#claude-desktop-configuration)
+- [Documentation Management](#documentation-management)
+  - [Direct vs. Queue-Based Documentation Addition](#direct-vs-queue-based-documentation-addition)
+  - [Local Repository Indexing](#local-repository-indexing)
+  - [Repository Configuration](#repository-configuration)
+- [Advanced Features](#advanced-features)
+  - [Enhanced Search Capabilities](#enhanced-search-capabilities)
+  - [Metadata Filtering](#metadata-filtering)
+  - [Smart Re-indexing](#smart-re-indexing)
 - [Acknowledgments](#acknowledgments)
 - [Troubleshooting](#troubleshooting)
 
@@ -30,6 +41,9 @@ An MCP server implementation that provides tools for retrieving and processing d
      - `useChain`: Whether to use LLM chain for processing (default: true)
      - `synthesizeFullContent`: Whether to read and synthesize full document content (default: true)
      - `returnFormat`: Format to return results in ('json' or 'text', default: 'json')
+     - `repository`: Filter results by repository name
+     - `language`: Filter results by programming language
+     - `fileType`: Filter results by file extension (e.g., "js", "py")
 
 2. **list_sources**
    - List all available documentation sources
@@ -64,10 +78,10 @@ An MCP server implementation that provides tools for retrieving and processing d
 
 9. **local_repository**
    - Adds and indexes a local code repository.
-   - Configurable include/exclude patterns, chunking strategies, and optional watch mode.
-   - Uses asynchronous processing for large repositories, with progress tracking via `get_indexing_status`.
-   - Manages persistent indexing state to avoid re-indexing unchanged files.
-   - Required parameter: `path` (absolute or relative path). Optional: `name`, `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`.
+   - Configurable include/exclude patterns, chunking strategies, and optional watch mode
+   - Uses asynchronous processing for large repositories, with progress tracking via `get_indexing_status`
+   - Manages persistent indexing state to avoid re-indexing unchanged files
+   - Required parameter: `path` (absolute or relative path). Optional: `name`, `include`, `exclude`, `watchMode`, `watchInterval`, `chunkSize`, `fileTypeConfig`
 
 10. **list_repositories** (Enhanced)
     - Lists all configured documentation repositories. This tool has been migrated to the enhanced architecture.
@@ -100,14 +114,7 @@ An MCP server implementation that provides tools for retrieving and processing d
 
 ## Quick Start
 
-   - Search through the documentation using vector search
-   - Returns relevant chunks of documentation with source information
-   - Enhanced with LLM processing to confirm relevance and synthesize content
-   - Supports JSON or text output formats
-   - Optional parameters:
-     - `useChain`: Whether to use LLM chain for processing (default: true)
-     - `synthesizeFullContent`: Whether to read and synthesize full document content (default: true)
-     - `returnFormat`: Format to return results in ('json' or 'text', default: 'json')
+The RAG Documentation tool is designed for:
 
 - Enhancing AI responses with relevant documentation
 - Building documentation-aware AI assistants
@@ -137,7 +144,7 @@ The system includes an enhanced web interface (`src/server-enhanced.ts`) that ca
 2. The interface provides:
    - Real-time queue monitoring
    - Documentation source management (URLs and Local Repositories)
-   - Search interface for testing queries
+   - Search interface for testing queries. The default score threshold in the search interface is 0.1.
    - System status and health checks
    - **Management of Local Repositories** (Add, List, Update, Remove)
 
@@ -177,6 +184,36 @@ The system uses a Large Language Model (LLM) for advanced processing of search r
 - `OPENAI_API_KEY`: Required when using OpenAI as provider (shared with embedding service)
 - `LLM_FALLBACK_PROVIDER`: Optional backup provider ('ollama' or 'openai')
 - `LLM_FALLBACK_MODEL`: Optional model for fallback provider
+
+### Qdrant Vector Database
+
+The system uses Qdrant as its vector database for storing and retrieving embeddings. The Qdrant configuration has been optimized for better performance and reliability.
+
+#### Qdrant Configuration Features
+
+- **HNSW Index Configuration**: Optimized for better search performance with parameters:
+  - `m`: 16 (More connections per node)
+  - `ef_construct`: 100 (Higher values give more accurate index)
+  - `full_scan_threshold`: 10000 (When to perform full scan)
+
+- **Optimizers Configuration**: Improved indexing performance with:
+  - `indexing_threshold`: 50000 (Points per segment)
+  - `vacuum_min_vector_number`: 1000 (Minimum vectors to vacuum)
+
+- **Vector Size Consistency Checking**: Detects embedding dimension mismatches between different providers
+  - Warns when switching between embedding providers with different vector dimensions
+  - Stores configuration in a special payload to track vector dimensions
+
+- **Payload Indexes**: Created for efficient filtering on common fields:
+  - `repository`: Filter by repository name
+  - `language`: Filter by programming language
+  - `isRepositoryFile`: Distinguish between repository files and web documents
+  - `fileId`: Unique identifier for each file
+
+#### Qdrant Environment Variables
+
+- `QDRANT_URL`: URL to the Qdrant server (default: 'http://localhost:6333')
+- `QDRANT_API_KEY`: API key for Qdrant cloud (optional, for cloud deployment)
 
 ### Cline Configuration
 
@@ -414,6 +451,61 @@ The `autoWatch` setting is now managed within each individual repository configu
   - `chunkStrategy`: Chunking strategy ("semantic", "line", or "character")
   - `chunkSize`: Optional override for chunk size
 
+## Advanced Features
+
+### Enhanced Search Capabilities
+
+The system now provides enhanced search capabilities with several improvements:
+
+1. **Query Parameter Parsing**: The search engine automatically detects and applies filters from the query text:
+   - `language:python` will filter results to Python files
+   - `repo:my-project` will filter results to a specific repository
+   - `file:js` will filter results to JavaScript files
+
+2. **Explicit Filter Parameters**: You can also specify filters directly in the search parameters:
+   ```
+   search_documentation with {
+     "query": "async function examples",
+     "repository": "my-project",
+     "language": "javascript",
+     "fileType": "js"
+   }
+   ```
+
+3. **Improved Search Accuracy**: The search now uses optimized HNSW parameters:
+   - Higher `hnsw_ef` value (128) provides more accurate search results
+   - Configurable `exact` parameter for precise but slower searches when needed
+   - Optimized score threshold (0.65) balances precision and recall
+
+4. **Result Ranking**: Search results are now ranked using multiple factors:
+   - Content type priority (documentation over code)
+   - Semantic similarity score
+   - Advanced scoring parameters to improve relevance
+
+### Metadata Filtering
+
+The system now supports advanced filtering based on metadata fields that are stored in Qdrant:
+
+1. **Repository Filtering**: Filter documents by repository name
+2. **Language Filtering**: Filter by programming language
+3. **File Type Filtering**: Filter by file extension
+4. **Domain Filtering**: Distinguish between documentation and code
+5. **File ID Filtering**: Filter by specific file identifiers
+
+These filters can be combined to create complex queries. For example, you can search for "async function" in JavaScript files from the "my-project" repository.
+
+### Smart Re-indexing
+
+The system now implements intelligent re-indexing to avoid redundant work:
+
+1. **File Content Hashing**: Files are only re-indexed if their content has changed
+2. **File Metadata Tracking**: File metadata is stored and tracked across indexing operations
+3. **Efficient Updates**: When files change, their previous entries are deleted before re-indexing
+4. **Batch Deletion**: Deleted files are removed in bulk operations for efficiency
+5. **File Tracking Cache**: A persistent cache tracks file states between server restarts
+
+These optimizations significantly improve indexing performance, especially for large repositories with frequent changes.
+
 ## Acknowledgments
 
 This project is a fork of [qpd-v/mcp-ragdocs](https://github.com/qpd-v/mcp-ragdocs), originally developed by qpd-v. The original project provided the foundation for this implementation.
@@ -441,3 +533,41 @@ lsof -i :3030
 ```
 
 4. You can also change the default port in the configuration if needed
+
+### Search Issues
+
+If you're experiencing issues with search results:
+
+1. **Vector Dimension Mismatch**: 
+   - Check your console logs for warnings about vector size mismatches
+   - If you've switched embedding providers, you'll see a warning like: "⚠️ Vector size mismatch: Collection has 768 dimensions, but current embedding provider uses 1536 dimensions"
+   - Solution: Stick to the same embedding provider, or delete the Qdrant collection and re-index
+
+2. **No Results or Poor Results**:
+   - Try lowering the score threshold by specifying it directly in the search query
+   - Ensure your query is relevant to the indexed content
+   - Check if appropriate payload indexes are created for your filter fields
+
+3. **Slow Search Performance**:
+   - Use the built-in payload indexes for faster filtering
+   - Avoid using exact search for large collections
+   - Optimize your HNSW index parameters if needed
+
+### Indexing Issues
+
+If you encounter problems during indexing:
+
+1. **Timeout Errors**:
+   - These should be resolved by the asynchronous processing implementation
+   - Use the `get_indexing_status` tool to monitor progress
+   - Check server logs for detailed progress information
+
+2. **File Format Errors**:
+   - Some files might fail to process due to encoding issues
+   - Check the logs for specific error messages
+   - Consider excluding problematic files using the exclude patterns
+
+3. **Indexing Performance**:
+   - Large repositories can take significant time to index
+   - Use smaller batch sizes for more responsive progress updates
+   - Consider indexing only essential file types and directories

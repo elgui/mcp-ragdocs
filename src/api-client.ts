@@ -112,25 +112,100 @@ export class ApiClient {
           vectors: {
             size: this.vectorSize, // Dynamic size based on provider
             distance: "Cosine",
+            // Add HNSW index configuration for better search performance
+            hnsw_config: {
+              m: 16, // More connections per node (default: 16)
+              ef_construct: 100, // Higher values give more accurate index (default: 100)
+              full_scan_threshold: 10000 // When to perform full scan (default: 10000)
+            }
           },
-            optimizers_config: {
+          optimizers_config: {
             default_segment_number: 2,
             memmap_threshold: 20000,
+            indexing_threshold: 50000, // Points per segment (default: 20000)
+            vacuum_min_vector_number: 1000 // Minimum number of vectors to vacuum
           },
           replication_factor: 2,
         });
+        
+        // Store vector size in a configuration record for consistency checking
+        try {
+          await this.qdrantClient.setPayload(
+            COLLECTION_NAME,
+            {
+              points: ['vector_size_config'],
+              payload: { vector_size: this.vectorSize, provider: EMBEDDING_PROVIDER }
+            }
+          );
+        } catch (error) {
+          console.error('Failed to store vector size config. This is non-critical:', error);
+        }
 
-        // Create payload index for the 'repository' field after collection creation
+        // Create payload indexes for more efficient filtering
         await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
           field_name: 'repository',
           field_schema: 'keyword'
         });
+        
+        // Add more payload indexes for common query filters
+        try {
+          await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+            field_name: 'language',
+            field_schema: 'keyword'
+          });
+          
+          await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+            field_name: 'isRepositoryFile',
+            field_schema: 'bool'
+          });
+          
+          await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+            field_name: 'fileId',
+            field_schema: 'keyword'
+          });
+        } catch (error) {
+          console.error('Failed to create some payload indexes. This is non-critical:', error);
+        }
 
       } else {
-        // If collection exists, ensure the index is present (optional, but good practice)
-        // This part is more complex as it requires checking existing indexes and creating if missing.
-        // A more robust solution might check and create the index here if it's missing.
-        // For now, we assume the index exists if the collection exists.
+        // Check if the collection's vector size matches our current embedding provider
+        try {
+          const collectionInfo = await this.qdrantClient.getCollection(COLLECTION_NAME);
+          const storedSize = collectionInfo.config.params.vectors?.size;
+          
+          if (storedSize !== this.vectorSize) {
+            console.warn(`⚠️ Vector size mismatch: Collection has ${storedSize} dimensions, but current embedding provider uses ${this.vectorSize} dimensions.`);
+            console.warn('This will cause issues with indexing and searching. Consider using a compatible embedding provider or create a new collection.');
+          }
+          
+          // Try to create any missing payload indexes for better filtering performance
+          try {
+            // We use a try-catch for each index creation since some might already exist
+            await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+              field_name: 'repository',
+              field_schema: 'keyword'
+            }).catch(() => {});  // Ignore if already exists
+            
+            await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+              field_name: 'language',
+              field_schema: 'keyword'
+            }).catch(() => {}); // Ignore if already exists
+            
+            await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+              field_name: 'isRepositoryFile',
+              field_schema: 'bool'
+            }).catch(() => {}); // Ignore if already exists
+            
+            await this.qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+              field_name: 'fileId',
+              field_schema: 'keyword'
+            }).catch(() => {}); // Ignore if already exists
+          } catch (error) {
+            console.error('Failed to create or check payload indexes. This is non-critical:', error);
+          }
+        } catch (error) {
+          console.error('Failed to check collection vector size:', error);
+        }
       }
     } catch (error) {
       if (error instanceof Error) {

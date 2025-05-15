@@ -186,7 +186,9 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
 
       // Start the indexing process asynchronously
       // Note: The tool execution will finish after this, but the async process continues.
-      this.processRepositoryAsync(config, this.activeProgressToken).catch(async (err) => {
+      const metadataManager = await getFileMetadataManager();
+      const initialExistingRepoMetadata = await metadataManager.getRepositoryMetadata(config.name);
+      this.processRepositoryAsync(config, initialExistingRepoMetadata, this.activeProgressToken).catch(async (err) => {
         error(`[${config.name}] Uncaught error during async repository processing: ${err instanceof Error ? err.message : String(err)}`);
         // Ensure status is marked as failed even if the promise is not awaited here
         await this.statusManager.completeStatus(
@@ -219,7 +221,8 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     processedFiles: number,
     skippedFiles: number,
     filesNeedingUpdate: number,
-    processedFilesMetadata: FileIndexMetadata[]
+    processedFilesMetadata: FileIndexMetadata[],
+    existingRepoMetadata: Record<string, FileIndexMetadata> | undefined
   }> {
     if (!this.apiClient || !this.server) {
       throw new McpError(ErrorCode.InternalError, 'API client or server is not initialized for LocalRepositoryEnhancedTool during file processing');
@@ -280,7 +283,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
         if (!content.trim()) {
           debug(`[${repositoryId}] Skipping empty file ${relativePath}.`);
           skippedFiles++;
-          const existingMetadata = await metadataManager.getFileMetadata(repositoryId, fileId);
+        const existingMetadata: FileIndexMetadata | undefined = await metadataManager.getFileMetadata(repositoryId, fileId);
           if (existingMetadata) {
             info(`[${repositoryId}] File ${relativePath} is now empty. Removing its Qdrant entries and metadata.`);
             // TODO: Sub-Task 2: Implement deletion of old chunks from Qdrant for fileId
@@ -342,20 +345,53 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
       }
     }
 
+    const deletedFileIds = [];
     for (const knownFileId of allKnownFileIdsInRepo) {
       if (!currentFileIdsOnDisk.has(knownFileId)) {
         const deletedMetadata = await metadataManager.getFileMetadata(repositoryId, knownFileId);
         const deletedFilePath = deletedMetadata?.filePath || 'unknown path';
-        info(`[${repositoryId}] File ${deletedFilePath} (ID: ${knownFileId}) deleted from source. Removing from Qdrant and metadata.`);
-        // TODO: Sub-Task 2: Implement deletion of chunks from Qdrant for knownFileId
-        error(`[${repositoryId}] QDRANT_DELETION_PENDING: File ${deletedFilePath} (ID: ${knownFileId}) was deleted. Qdrant points should be removed.`);
+        info(`[${repositoryId}] File ${deletedFilePath} (ID: ${knownFileId}) deleted from source. Will remove from Qdrant and metadata.`);
+        deletedFileIds.push(knownFileId);
         await metadataManager.removeFileMetadata(repositoryId, knownFileId);
         deletedFilesCount++;
       }
     }
+    
+    // Delete Qdrant entries for all deleted files at once
+    if (deletedFileIds.length > 0) {
+      info(`[${repositoryId}] Deleting Qdrant entries for ${deletedFileIds.length} removed files...`);
+      try {
+        const deleteFilter = {
+          must: [
+            {
+              key: 'repository',
+              match: { value: repositoryId }
+            },
+            {
+              key: 'isRepositoryFile', 
+              match: { value: true }
+            }
+          ],
+          should: deletedFileIds.map(fileId => ({
+            key: 'fileId',
+            match: { value: fileId }
+          }))
+        };
+        
+        const deleteResult = await this.apiClient.qdrantClient.delete(COLLECTION_NAME, {
+          filter: deleteFilter,
+          wait: true
+        });
+        
+        info(`[${repositoryId}] Successfully deleted Qdrant entries for removed files: ${deleteResult.status}`);
+      } catch (deleteError) {
+        error(`[${repositoryId}] Error deleting Qdrant entries for removed files: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
+        // Continue with indexing despite the error
+      }
+    }
 
     info(`[${repositoryId}] Completed file scan. New/Modified files to process: ${processedFiles}. Files skipped (unchanged/excluded/empty/error): ${skippedFiles}. Files deleted: ${deletedFilesCount}.`);
-    return { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata };
+    return { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata, existingRepoMetadata };
   }
 
   private async chunkFileContent(
@@ -618,7 +654,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return crypto.randomBytes(16).toString('hex');
   }
 
-  private async processRepositoryAsync(config: RepositoryConfig, _progressToken?: string | number): Promise<void> {
+  private async processRepositoryAsync(config: RepositoryConfig, existingRepoMetadata: Record<string, FileIndexMetadata> | undefined, _progressToken?: string | number): Promise<void> {
     const repositoryId = config.name;
     try {
       LocalRepositoryEnhancedTool.activeIndexingProcesses.set(repositoryId, true);
@@ -637,9 +673,53 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
 
       const { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata } = await this.processRepository(config);
 
-      // TODO: Sub-Task 2: Before upserting, delete points from Qdrant for `filesNeedingUpdate`
+      // Delete existing records for modified files to avoid duplicates
       if (filesNeedingUpdate > 0) {
-        info(`[${repositoryId}] ${filesNeedingUpdate} files were modified and their old Qdrant entries should be deleted before re-indexing.`);
+        info(`[${repositoryId}] ${filesNeedingUpdate} files were modified - deleting old Qdrant entries before re-indexing.`);
+        
+        // Get all fileIds that need updating
+        const fileIdsToUpdate = processedFilesMetadata
+          .filter((meta: FileIndexMetadata) => {
+            // Check if this is a modified file (not a brand new one)
+            // We check if the fileId exists in the previously loaded existingRepoMetadata
+            return existingRepoMetadata && existingRepoMetadata[meta.fileId] !== undefined;
+          })
+          .map(meta => meta.fileId);
+          
+        if (fileIdsToUpdate.length > 0) {
+          try {
+            info(`[${repositoryId}] Deleting old Qdrant entries for ${fileIdsToUpdate.length} modified files...`);
+            
+            // Create a filter that matches any of these fileIds
+            const deleteFilter = {
+              must: [
+                {
+                  key: 'repository',
+                  match: { value: repositoryId }
+                },
+                {
+                  key: 'isRepositoryFile',
+                  match: { value: true }
+                }
+              ],
+              should: fileIdsToUpdate.map(fileId => ({
+                key: 'fileId',
+                match: { value: fileId }
+              }))
+            };
+            
+            // Delete all points matching the filter
+            const deleteResult = await apiClient.qdrantClient.delete(COLLECTION_NAME, {
+              filter: deleteFilter,
+              wait: true
+            });
+            
+            info(`[${repositoryId}] Successfully deleted old entries for modified files: ${deleteResult.status}`);
+          } catch (deleteError) {
+            error(`[${repositoryId}] Error deleting old entries for modified files: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
+            // Continue with indexing despite the error
+          }
+        }
       }
 
       await this.statusManager.updateStatus({
@@ -659,8 +739,6 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
       const totalBatches = Math.ceil(totalChunks / batchSize);
 
       info(`[${config.name}] Starting to generate embeddings and index ${totalChunks} chunks in ${totalBatches} batches...`);
-
-      const COLLECTION_NAME = 'documentation';
 
       for (let i = 0; i < totalChunks; i += batchSize) {
         const batchChunks = chunks.slice(i, i + batchSize);
@@ -713,6 +791,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
               await apiClient.qdrantClient.upsert(COLLECTION_NAME, {
                 wait: true,
                 points: successfulPoints,
+                // Set the ordering by ID for better batch processing
               });
               indexedChunks += successfulPoints.length;
 

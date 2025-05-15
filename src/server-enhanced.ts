@@ -375,7 +375,7 @@ export class WebInterfaceEnhanced {
         next: NextFunction
       ): Promise<void> => {
         try {
-          const { query } = req.body;
+          const { query, score_threshold } = req.body; // Extract score_threshold
           if (!query) {
             const error: ApiError = new Error("Query is required");
             error.status = 400;
@@ -388,7 +388,8 @@ export class WebInterfaceEnhanced {
           }
 
           info('Server: Calling searchDocumentationTool.execute...'); // Log calling the tool
-          const searchResponse = await searchDocumentationTool.execute({ query, returnFormat: 'json' }); // Call the tool's execute method
+          // Pass score_threshold to the tool if it exists in the request body
+          const searchResponse = await searchDocumentationTool.execute({ query, score_threshold, returnFormat: 'json' });
           info('Server: searchDocumentationTool.execute successful.'); // Log successful tool execution
 
           // The enhanced tool is expected to return a structured JSON response directly
