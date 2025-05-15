@@ -139,15 +139,24 @@ function parseTypeScriptFile(content: string): CodeChunk[] {
   return chunks;
 }
 
+
 /**
- * Parse a JavaScript file (uses the same approach as TypeScript)
+ * Parses a JavaScript file. Currently uses the same parsing logic as TypeScript files
+ * via ts-morph, which supports JavaScript.
+ *
+ * @param content The content of the JavaScript file.
+ * @returns An array of CodeChunk objects representing the parsed code elements.
  */
 function parseJavaScriptFile(content: string): CodeChunk[] {
   return parseTypeScriptFile(content); // ts-morph can handle JavaScript too
 }
 
 /**
- * Parse a Python file using our custom docstring parser
+ * Parses a Python file by identifying classes and functions using regex and associating
+ * them with parsed Python docstrings.
+ *
+ * @param content The content of the Python file.
+ * @returns An array of CodeChunk objects representing the parsed code elements.
  */
 function parsePythonFile(content: string): CodeChunk[] {
   const chunks: CodeChunk[] = [];
@@ -379,7 +388,10 @@ function parseGenericCodeFile(content: string): CodeChunk[] {
 }
 
 /**
- * Get the indentation level of a line
+ * Calculates the indentation level of a given line based on leading whitespace.
+ *
+ * @param line The string line to check.
+ * @returns The number of leading whitespace characters.
  */
 function getIndentLevel(line: string): number {
   const match = line.match(/^(\s*)/);
@@ -387,20 +399,24 @@ function getIndentLevel(line: string): number {
 }
 
 /**
- * Estimate the number of tokens in a string
- * This is a simple approximation - about 4 characters per token for English text
+ * Estimates the number of tokens in a given string.
+ * This is a simple approximation, assuming about 4 characters per token for English text.
+ *
+ * @param text The string content to estimate tokens for.
+ * @returns The estimated number of tokens.
  */
 export function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
 /**
- * Split a chunk into smaller chunks to stay within token limits
- * 
- * @param chunk The code chunk to split
- * @param minTokens Minimum tokens per chunk
- * @param maxTokens Maximum tokens per chunk
- * @returns Array of smaller chunks
+ * Splits a large code chunk into smaller chunks to ensure they stay within specified token limits.
+ * This is useful for processing code snippets that might exceed the context window of language models.
+ *
+ * @param chunk The CodeChunk object to split.
+ * @param minTokens The minimum desired token count for resulting chunks (currently not strictly enforced in splitting logic).
+ * @param maxTokens The maximum allowed token count for resulting chunks.
+ * @returns An array of smaller CodeChunk objects derived from the original chunk.
  */
 export function splitChunkByTokens(chunk: CodeChunk, minTokens: number, maxTokens: number): CodeChunk[] {
   const tokenCount = estimateTokenCount(chunk.text);

@@ -26,6 +26,11 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
   private static activeIndexingProcesses: Map<string, boolean> = new Map();
   private static BATCH_SIZE = 50;
 
+  /**
+   * Constructs an instance of LocalRepositoryEnhancedTool.
+   * Initializes the base tool and the IndexingStatusManager.
+   * @param options Optional configuration options including apiClient and server.
+   */
   constructor(options?: { apiClient?: any, server?: any }) {
     super(options);
     this.statusManager = new IndexingStatusManager();
@@ -216,6 +221,12 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     }
   }
 
+  /**
+   * Processes the files within a repository, identifies changes, chunks content,
+   * and prepares data for indexing.
+   * @param config The repository configuration.
+   * @returns An object containing processed chunks, file counts, and metadata.
+   */
   private async processRepository(config: RepositoryConfig): Promise<{
     chunks: DocumentChunk[],
     processedFiles: number,
@@ -394,6 +405,18 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return { chunks, processedFiles, skippedFiles, filesNeedingUpdate, processedFilesMetadata, existingRepoMetadata };
   }
 
+  /**
+   * Chunks the content of a single file based on the configured chunking strategy.
+   * Supports semantic chunking for code files and line/paragraph chunking for text files.
+   * @param content The content of the file.
+   * @param filePath The absolute path to the file.
+   * @param relativePath The path to the file relative to the repository root.
+   * @param config The repository configuration.
+   * @param language The detected language of the file.
+   * @param chunkStrategy The chunking strategy to use ('semantic', 'line', or 'text').
+   * @param fileId The unique ID of the file.
+   * @returns An array of DocumentChunk objects.
+   */
   private async chunkFileContent(
     content: string,
     filePath: string,
@@ -428,7 +451,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
               chunks.push({
                 text,
                 url: fileUrl,
-                title,
+                title: codeChunk.docstring ? `${title}: ${codeChunk.docstring.trim().split('\\n')[0]}` : `${title}: ${symbolName}`,
                 timestamp,
                 filePath: relativePath,
                 language,
@@ -446,34 +469,33 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
           }
         }
 
-        if (codeChunk.docstring) {
-          const codeText = codeChunk.text.trim();
-          if (codeText) {
-            const symbolName = codeChunk.parent
-              ? `${codeChunk.parent}.${codeChunk.symbolName}`
-              : codeChunk.symbolName;
-            const codeTextChunks = splitTextByTokens(codeText, 200, 400, true);
+        // Always chunk code text for semantic chunks
+        const codeText = codeChunk.text.trim();
+        if (codeText) {
+          const symbolName = codeChunk.parent
+            ? `${codeChunk.parent}.${codeChunk.symbolName}`
+            : codeChunk.symbolName;
+          const codeTextChunks = splitTextByTokens(codeText, 200, 400, true);
 
-            codeTextChunks.forEach((text) => {
-              chunks.push({
-                text,
-                url: fileUrl,
-                title,
-                timestamp,
-                filePath: relativePath,
-                language,
-                chunkIndex: chunks.length,
-                totalChunks: -1,
-                repository: config.name,
-                isRepositoryFile: true,
-                fileId,
-                symbol: symbolName,
-                domain: 'code' as 'code' | 'docs',
-                lines: [codeChunk.startLine, codeChunk.endLine] as [number, number],
-                commit_sha: commitSha
-              });
+          codeTextChunks.forEach((text) => {
+            chunks.push({
+              text,
+              url: fileUrl,
+              title: `${title}: ${symbolName}`,
+              timestamp,
+              filePath: relativePath,
+              language,
+              chunkIndex: chunks.length,
+              totalChunks: -1,
+              repository: config.name,
+              isRepositoryFile: true,
+              fileId,
+              symbol: symbolName,
+              domain: 'code' as 'code' | 'docs',
+              lines: [codeChunk.startLine, codeChunk.endLine] as [number, number],
+              commit_sha: commitSha
             });
-          }
+          });
         }
       }
 
@@ -483,7 +505,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
           chunks.push({
             text: moduleChunk.docstring,
             url: fileUrl,
-            title,
+            title: moduleChunk.docstring ? `${title}: ${moduleChunk.docstring.trim().split('\\n')[0]}` : `${title}: ${path.basename(relativePath)}`,
             timestamp,
             filePath: relativePath,
             language,
@@ -501,7 +523,7 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
           chunks.push({
             text: `File: ${relativePath}`,
             url: fileUrl,
-            title,
+            title: `${title}: ${path.basename(relativePath)}`,
             timestamp,
             filePath: relativePath,
             language,
@@ -557,6 +579,13 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return chunks;
   }
 
+  /**
+   * Chunks text content by splitting it into words and grouping them into chunks
+   * up to a maximum size.
+   * @param text The text content to chunk.
+   * @param maxChunkSize The maximum size of each chunk in characters.
+   * @returns An array of text chunks.
+   */
   private chunkText(text: string, maxChunkSize: number): string[] {
     const words = text.split(/\s+/);
     const chunks: string[] = [];
@@ -579,6 +608,12 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return chunks;
   }
 
+  /**
+   * Chunks text content by grouping lines up to a maximum size.
+   * @param text The text content to chunk.
+   * @param maxChunkSize The maximum size of each chunk in characters.
+   * @returns An array of text chunks.
+   */
   private chunkByLines(text: string, maxChunkSize: number): string[] {
     const lines = text.split(/\r?\n/);
     const chunks: string[] = [];
@@ -605,6 +640,12 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return chunks;
   }
 
+  /**
+   * Chunks text content by grouping paragraphs up to a maximum size.
+   * @param text The text content to chunk.
+   * @param maxChunkSize The maximum size of each chunk in characters.
+   * @returns An array of text chunks.
+   */
   private chunkByParagraphs(text: string, maxChunkSize: number): string[] {
     const paragraphs = text.split(/\r?\n\r?\n/);
     const chunks: string[] = [];
@@ -631,6 +672,10 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     return chunks;
   }
 
+  /**
+   * Saves the repository configuration to a JSON file.
+   * @param config The repository configuration to save.
+   */
   private async saveRepositoryConfig(config: RepositoryConfig): Promise<void> {
     try {
       await fs.mkdir(REPO_CONFIG_DIR, { recursive: true });
@@ -650,10 +695,21 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     }
   }
 
+  /**
+   * Generates a unique point ID for Qdrant.
+   * @returns A hexadecimal string representing the point ID.
+   */
   private generatePointId(): string {
     return crypto.randomBytes(16).toString('hex');
   }
 
+  /**
+   * Processes the repository files asynchronously, including scanning, chunking,
+   * generating embeddings, and indexing chunks in Qdrant.
+   * @param config The repository configuration.
+   * @param existingRepoMetadata Existing metadata for the repository.
+   * @param _progressToken Optional progress token for reporting status.
+   */
   private async processRepositoryAsync(config: RepositoryConfig, existingRepoMetadata: Record<string, FileIndexMetadata> | undefined, _progressToken?: string | number): Promise<void> {
     const repositoryId = config.name;
     try {
@@ -853,6 +909,12 @@ export class LocalRepositoryEnhancedTool extends EnhancedBaseTool {
     }
   }
 
+  /**
+   * Handles changes detected by the repository watcher, triggering re-indexing or deletion
+   * for changed or removed files.
+   * @param changedFiles An array of paths to files that have changed.
+   * @param removedFiles An array of paths to files that have been removed.
+   */
   private async handleWatchedFilesChange(changedFiles: string[], removedFiles: string[]): Promise<void> {
     if (!this.repositoryConfig) {
       error('RepositoryWatcher callback called before repositoryConfig was set.');
